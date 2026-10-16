@@ -17,7 +17,9 @@ export function formatDateTime(value) {
 export function formatMoney(amount, currency = 'INR') {
   if (amount === null || amount === undefined) return '—';
   try {
-    return new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
+    // exact amount: paise / cents shown when there are any (₹42.50), whole amounts without (₹2,00,000)
+    const whole = Number.isInteger(Math.round(Number(amount) * 100) / 100);
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency, minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 }).format(amount);
   } catch {
     return `${currency} ${amount}`;
   }

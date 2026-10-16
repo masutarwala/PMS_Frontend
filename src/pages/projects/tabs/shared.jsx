@@ -28,7 +28,8 @@ export const ACCESS = {
   edit: { label: 'Can edit', icon: SquarePen, desc: 'Can edit the project' },
 };
 
-export const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+/** a as a % of b, with up to 2 decimals (not rounded to a whole number). */
+export const pct = (a, b) => (b ? Math.round((a / b) * 10000) / 100 : 0);
 const dueLabel = (d) => (d ? new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short' }).format(new Date(`${d}T00:00:00`)) : '—');
 const shortDate = (d) => new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short' }).format(new Date(`${d}T00:00:00`));
 

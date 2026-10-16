@@ -53,6 +53,16 @@ export const projectsApi = {
   remove: (id) => data(api.delete(`/projects/${id}`)),
 };
 
+export const timesheetsApi = {
+  list: (params) => data(api.get('/timesheets', { params: toParams(params) })),
+  summary: (scope) => data(api.get('/timesheets/summary', { params: { scope } })),
+  options: () => data(api.get('/timesheets/options')),
+  get: (id) => data(api.get(`/timesheets/${id}`)),
+  create: (body) => data(api.post('/timesheets', body)),
+  update: (id, body) => data(api.put(`/timesheets/${id}`, body)),
+  remove: (id) => data(api.delete(`/timesheets/${id}`)),
+};
+
 export const mastersApi = {
   list: (name) => data(api.get(`/masters/${name}`)),
   lookup: (type) => data(api.get(`/masters/lookups/${type}`)),

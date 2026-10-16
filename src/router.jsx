@@ -18,6 +18,8 @@ const ProjectListPage = lazy(() => import('@/pages/projects/ProjectListPage'));
 const ProjectFormPage = lazy(() => import('@/pages/projects/ProjectFormPage'));
 const ProjectDetailsPage = lazy(() => import('@/pages/projects/ProjectDetailsPage'));
 const ProjectEditPage = lazy(() => import('@/pages/projects/ProjectEditPage'));
+const TimesheetListPage = lazy(() => import('@/pages/timesheet/TimesheetListPage'));
+const TimesheetFormPage = lazy(() => import('@/pages/timesheet/TimesheetFormPage'));
 const ConfigListPage = lazy(() => import('@/pages/config/ConfigListPage'));
 const ConfigFormPage = lazy(() => import('@/pages/config/ConfigFormPage'));
 const ProjectTypeFormPage = lazy(() => import('@/pages/config/ProjectTypeFormPage'));
@@ -70,6 +72,9 @@ export const router = createBrowserRouter([
           { path: 'projects/new', element: guard(SCREENS.PROJECTS, 'create', <ProjectFormPage key="new" />) },
           { path: 'projects/:id', element: guard(SCREENS.PROJECTS, 'view', <ProjectDetailsPage />) },
           { path: 'projects/:id/edit', element: guard(SCREENS.PROJECTS, 'edit', <ProjectEditPage />) },
+          { path: 'timesheet', element: guard(SCREENS.TIMESHEET, 'view', <TimesheetListPage />) },
+          { path: 'timesheet/new', element: guard(SCREENS.TIMESHEET, 'create', <TimesheetFormPage key="new" />) },
+          { path: 'timesheet/:id/edit', element: guard(SCREENS.TIMESHEET, 'edit', <TimesheetFormPage />) },
 
           { path: '*', element: <NotFoundPage /> },
         ],

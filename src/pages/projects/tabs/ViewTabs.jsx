@@ -1,10 +1,9 @@
 import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { CircleCheck, CircleX, Clock3, ExternalLink, Pencil, PieChart, RefreshCw, Target, UserCog, Users } from 'lucide-react';
+import { CircleCheck, CircleX, Clock3, ExternalLink, Pencil, RefreshCw, Target, UserCog, Users } from 'lucide-react';
 import { projectsApi } from '@/api/endpoints';
 import { Avatar, EmptyState } from '@/components/ui/Display';
 import { Spinner } from '@/components/ui/Loader';
-import { DonutCard, GaugeCard, KpiSection, WatermarkCard } from '@/components/ui/MetricCards';
 import { formatDate, formatDateTime, formatMoney, formatNumber } from '@/lib/format';
 import { stageChange } from '../stageChange';
 import { AccessBadge, AccessTiles, ColorDot, CommentsLog, EffortSplit, GradeTag, MemberCell, pct, ReviewGrid } from './shared';
@@ -372,7 +371,7 @@ function CostVsEstimate({ p, cost }) {
         {tile('Estimate amount', est != null ? formatMoney(est, cur) : '—')}
         {tile('Cost so far', formatMoney(cost, cur))}
         {tile('Remaining', est != null ? formatMoney(est - cost, cur) : '—', est != null && est >= cost)}
-        {tile('Value used', used != null ? `${Math.round(used * 10) / 10}%` : '—')}
+        {tile('Value used', used != null ? `${formatNumber(Math.round(used * 100) / 100)}%` : '—')}
       </div>
       {est != null && (
         <>
@@ -390,11 +389,7 @@ function CostVsEstimate({ p, cost }) {
 }
 
 export function AnalysisView({ p, canEdit }) {
-  const allocated = p.estimates.reduce((s, e) => s + e.effortPercentage, 0);
-  const est = p.estimatedHours ?? 0;
-  const left = Math.max(0, est - p.loggedHours);
   const totalActual = p.estimates.reduce((s, e) => s + e.actualHours, 0);
-  const used = pct(p.loggedHours, est);
   const cur = p.estimatedAmountCurrency || 'INR';
   const mh = p.memberHours;
   const totalHours = mh.reduce((s, m) => s + m.hours, 0);
@@ -402,89 +397,9 @@ export function AnalysisView({ p, canEdit }) {
   const rated = mh.filter((m) => m.rate != null);
   const avgRate = rated.length ? rated.reduce((s, m) => s + m.rate, 0) / rated.length : null;
   return (
-    <div style={{ marginTop: 16 }}>
-      <KpiSection storageKey="project-analysis" columns={3}>
-        <DonutCard
-          title="Allocated"
-          icon={PieChart}
-          pill={`${allocated}%`}
-          percent={allocated}
-          value={allocated}
-          unit="%"
-          legend={[
-            ['Allocated', Math.min(100, allocated), '#16A34A'],
-            ['Remaining', Math.max(0, 100 - allocated), 'var(--surface-3)'],
-          ]}
-        />
-        <WatermarkCard
-          title="Estimated"
-          icon={Target}
-          pill={`${formatNumber(est)} hrs`}
-          value={est}
-          unit="hrs"
-          subs={[
-            [p.loggedHours, 'Logged'],
-            [left, 'Left'],
-          ]}
-        />
-        <GaugeCard
-          title="Logged"
-          icon={Clock3}
-          pill={!est ? 'No estimate' : used > 100 ? 'Over estimate' : used >= 85 ? 'Near limit' : 'On track'}
-          value={p.loggedHours}
-          max={est}
-        />
-      </KpiSection>
-
-      <div className="card card-flush" style={{ marginTop: 16 }}>
-        <CardHead title="Allocation vs actual" sub="Actual hours come from timesheets of this project.">
-          {canEdit && <EditLink id={p.id} tab="estimate">Edit allocation</EditLink>}
-        </CardHead>
-        <div style={{ padding: '16px 20px 4px' }}>
-          <EffortSplit estimates={p.estimates} legend={false} />
-        </div>
-        <div className="table-wrap" style={{ marginTop: 12 }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Task group</th>
-                <th className="right">Allocated</th>
-                <th className="right">Allocated hrs</th>
-                <th className="right">Actual hrs</th>
-                <th>Consumed</th>
-                <th className="right">Share of actual</th>
-              </tr>
-            </thead>
-            <tbody>
-              {p.estimates.map((e, i) => {
-                const consumed = e.hours ? pct(e.actualHours, e.hours) : 0;
-                return (
-                  <tr key={e.taskGroupId}>
-                    <td>
-                      <span className="row" style={{ gap: 8 }}>
-                        <ColorDot i={i} />
-                        <b>{e.taskGroupName}</b>
-                      </span>
-                    </td>
-                    <td className="num right">{e.effortPercentage}%</td>
-                    <td className="num right">{e.hours != null ? formatNumber(e.hours) : '—'}</td>
-                    <td className="num right">{formatNumber(e.actualHours)}</td>
-                    <td style={{ minWidth: 160 }}>
-                      <div className="row" style={{ gap: 8 }}>
-                        <div className={`progress grow${consumed > 100 ? ' is-danger' : consumed >= 85 ? ' is-warning' : ''}`}>
-                          <span style={{ width: `${Math.min(100, consumed)}%` }} />
-                        </div>
-                        <span className="small num">{e.hours ? `${consumed}%` : '—'}</span>
-                      </div>
-                    </td>
-                    <td className="num right">{pct(e.actualHours, totalActual)}%</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+    <div>
+      {/* cost first: what the project has cost so far against its estimate amount, then who it came from */}
+      <CostVsEstimate p={p} cost={totalCost} />
 
       <div className="card card-flush" style={{ marginTop: 16 }}>
         <CardHead title="Hours and cost by member" sub="Hours from timesheets of this project; rate per hour of each member." />
@@ -547,7 +462,56 @@ export function AnalysisView({ p, canEdit }) {
         )}
       </div>
 
-      <CostVsEstimate p={p} cost={totalCost} />
+      <div className="card card-flush" style={{ marginTop: 16 }}>
+        <CardHead title="Allocation vs actual" sub="Actual hours come from timesheets of this project.">
+          {canEdit && <EditLink id={p.id} tab="estimate">Edit allocation</EditLink>}
+        </CardHead>
+        <div style={{ padding: '16px 20px 4px' }}>
+          <EffortSplit estimates={p.estimates} legend={false} />
+        </div>
+        <div className="table-wrap" style={{ marginTop: 12 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Task group</th>
+                <th className="right">Allocated</th>
+                <th className="right">Allocated hrs</th>
+                <th className="right">Actual hrs</th>
+                <th>Consumed</th>
+                <th className="right">Share of actual</th>
+              </tr>
+            </thead>
+            <tbody>
+              {p.estimates.map((e, i) => {
+                const consumed = e.hours ? pct(e.actualHours, e.hours) : 0;
+                return (
+                  <tr key={e.taskGroupId}>
+                    <td>
+                      <span className="row" style={{ gap: 8 }}>
+                        <ColorDot i={i} />
+                        <b>{e.taskGroupName}</b>
+                      </span>
+                    </td>
+                    <td className="num right">{e.effortPercentage}%</td>
+                    <td className="num right">{e.hours != null ? formatNumber(e.hours) : '—'}</td>
+                    <td className="num right">{formatNumber(e.actualHours)}</td>
+                    <td style={{ minWidth: 160 }}>
+                      <div className="row" style={{ gap: 8 }}>
+                        <div className={`progress grow${consumed > 100 ? ' is-danger' : consumed >= 85 ? ' is-warning' : ''}`}>
+                          <span style={{ width: `${Math.min(100, consumed)}%` }} />
+                        </div>
+                        <span className="small num">{e.hours ? `${consumed}%` : '—'}</span>
+                      </div>
+                    </td>
+                    <td className="num right">{pct(e.actualHours, totalActual)}%</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
   );
 }
