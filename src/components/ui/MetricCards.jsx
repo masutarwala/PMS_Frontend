@@ -241,10 +241,10 @@ export function DonutCard({ title, icon, percent, value, unit, legend = [] }) {
             {unit && <small>{unit}</small>}
           </div>
           {legend.map(([label, pct, color]) => (
-            <span key={label}>
+            <span key={label} title={`${label}: ${Math.round(pct * 100) / 100}%`}>
               <i style={{ background: color }} />
-              {label}
-              <b>{Math.round(pct)}%</b>
+              <em>{label}</em>
+              <b>{fmt(Math.round(pct * 100) / 100)}%</b>
             </span>
           ))}
         </div>

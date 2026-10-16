@@ -117,9 +117,12 @@ th .th-sort svg { width: 14px; height: 14px; }
 
 /* donut card: keep the legend percentages inside narrow cards */
 .mc-donut .mc-body { gap: 14px; }
-.mc-donut .legend { min-width: 0; font-size: 12px; }
-.mc-donut .legend span { gap: 6px; white-space: nowrap; }
-.mc-donut .legend b { padding-left: 6px; }
+.mc-donut .legend { min-width: 0; flex: 1; font-size: 12px; }
+/* legend row: dot | label (shortens with … if needed) | value (always visible) */
+.mc-donut .legend span { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 6px; white-space: nowrap; }
+.mc-donut .legend em { font-style: normal; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mc-donut .legend b { margin-left: 0; padding-left: 4px; text-align: right; }
+.mc-donut .legend .mc-value { white-space: nowrap; }
 
 /* overview banner without the greeting heading */
 .hello .date + p { margin-top: 10px; }
@@ -168,3 +171,15 @@ th .th-sort svg { width: 14px; height: 14px; }
 .mc-pie .legend i { flex: none; }
 .mc-pie .legend .is-link { cursor: pointer; border-radius: 6px; }
 .mc-pie .legend .is-link:hover em { color: var(--green-700); text-decoration: underline; }
+.mc-donut .legend span.muted { display: block; }
+/* narrow donut cards (4 per row on laptops): smaller ring so the legend labels fit in full */
+.mc-donut { container-type: inline-size; }
+@container (max-width: 270px) {
+  .mc-donut .donut { width: 84px; height: 84px; }
+  .mc-donut .donut .center b { font-size: 18px; }
+  .mc-donut .mc-body { gap: 10px; }
+  .mc-donut .legend { font-size: 11.5px; }
+  .mc-donut .legend span { gap: 5px; }
+  .mc-donut .legend .mc-value { font-size: 20px !important; }
+  .mc-donut .mc-float { display: none; }
+}
