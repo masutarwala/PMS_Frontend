@@ -1,0 +1,79 @@
+/* Sign-in page. Uses the design tokens from theme.css. */
+
+.lg-page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background: linear-gradient(135deg, #F7FAF8 0%, #EEF4F0 100%);
+  display: grid;
+  place-items: center;
+  padding: 48px 24px;
+}
+
+/* decoration */
+.lg-blob {
+  position: absolute; left: -110px; top: -120px; width: 300px; height: 300px; border-radius: 50%;
+  background: radial-gradient(circle at 60% 60%, #DDF3E5 0%, #E9F6EE 60%, transparent 61%);
+  pointer-events: none;
+}
+/* sized by width AND height so it never reaches the feature row on short screens */
+.lg-corner { position: absolute; left: 0; bottom: 0; width: min(440px, 30vw, 26vh); height: auto; pointer-events: none; z-index: 0; }
+
+.lg-wrap {
+  position: relative; z-index: 1;
+  width: 100%; max-width: 1340px;
+  display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: 72px; align-items: center;
+}
+
+/* left: brand and message */
+.lg-intro { padding-left: 24px; }
+.lg-logo { height: 84px; width: auto; display: block; margin-bottom: 64px; }
+.lg-headline { font-size: clamp(36px, 4.2vw, 60px); line-height: 1.12; font-weight: 800; letter-spacing: -0.03em; color: #183A35; margin: 0; }
+.lg-headline span { color: var(--green-600); }
+.lg-lead { margin: 24px 0 40px; max-width: 560px; font-size: 18px; line-height: 1.6; color: var(--ink-2); }
+.lg-features { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; max-width: 640px; }
+.lg-feature { display: flex; flex-direction: column; gap: 2px; }
+.lg-feature-ico {
+  width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; margin-bottom: 14px;
+  background: var(--green-100); color: var(--green-700);
+}
+.lg-feature-ico svg.lucide { width: 26px; height: 26px; }
+.lg-feature b { font-size: 15.5px; color: var(--ink); font-weight: 600; }
+.lg-feature span:last-child { font-size: 13.5px; color: #6B7280; }
+
+/* right: sign-in card */
+.lg-card {
+  width: 100%; max-width: 680px; justify-self: end;
+  background: var(--surface); border-radius: 28px; padding: 48px 52px 36px;
+  box-shadow: 0 2px 6px rgba(19, 34, 26, .04), 0 30px 60px rgba(19, 34, 26, .08);
+}
+.lg-card-head { display: flex; align-items: center; gap: 24px; margin-bottom: 36px; }
+.lg-card-head h2 { font-size: 34px; letter-spacing: -0.02em; color: #183A35; margin: 0; }
+.lg-card-head p { margin: 4px 0 0; font-size: 18px; color: var(--ink-2); }
+.lg-card .field > label { font-size: 15px; font-weight: 600; color: var(--ink); }
+.lg-card .input-group > .input { height: 56px; font-size: 15.5px; }
+.lg-link { border: 0; background: none; padding: 0; font: inherit; font-size: 14px; font-weight: 600; color: var(--green-700); cursor: pointer; }
+.lg-link:hover { text-decoration: underline; }
+/* .lg-card prefix: this file can load before theme.css, so beat the base .btn rules */
+.lg-card .btn.lg-submit { width: 100%; height: 58px; font-size: 17px; margin-top: 6px; border-radius: 14px; }
+.lg-card .btn.lg-submit svg.lucide { width: 20px; height: 20px; }
+.lg-secure { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 28px; font-size: 12.5px; color: var(--ink-3); }
+.lg-secure svg.lucide { width: 18px; height: 18px; color: var(--green-600); }
+
+/* tablets / phones: card only, logo above */
+@media (max-width: 1100px) {
+  .lg-wrap { grid-template-columns: minmax(0, 1fr); gap: 32px; max-width: 640px; }
+  .lg-intro { padding-left: 0; text-align: center; }
+  .lg-logo { margin: 0 auto 24px; height: 64px; }
+  .lg-headline { font-size: 34px; }
+  .lg-lead, .lg-features { display: none; }
+  .lg-card { justify-self: stretch; }
+}
+@media (max-width: 560px) {
+  .lg-page { padding: 24px 16px; }
+  .lg-card { padding: 28px 22px 24px; border-radius: 22px; }
+  .lg-card-head { gap: 14px; margin-bottom: 24px; }
+  .lg-card-head h2 { font-size: 26px; }
+  .lg-card-head p { font-size: 15px; }
+  .lg-headline { font-size: 28px; }
+}
