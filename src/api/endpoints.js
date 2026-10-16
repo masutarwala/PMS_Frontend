@@ -57,6 +57,7 @@ export const timesheetsApi = {
   list: (params) => data(api.get('/timesheets', { params: toParams(params) })),
   summary: (scope) => data(api.get('/timesheets/summary', { params: { scope } })),
   options: () => data(api.get('/timesheets/options')),
+  projects: () => data(api.get('/timesheets/projects')),
   get: (id) => data(api.get(`/timesheets/${id}`)),
   create: (body) => data(api.post('/timesheets', body)),
   update: (id, body) => data(api.put(`/timesheets/${id}`, body)),

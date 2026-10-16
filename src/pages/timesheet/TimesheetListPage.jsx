@@ -70,11 +70,14 @@ function Summary({ s }) {
 export default function TimesheetListPage() {
   const perms = usePermissions(SCREENS.TIMESHEET);
   const { user } = useAuth();
-  // the Team tab is for Project Managers and the Super Admin only (the API checks it too)
-  const canSeeTeam = user.isSuperAdmin || user.role.code === 'PROJECT_MANAGER';
+  // Team tab: Project Managers and the Super Admin only (the API checks it too)
+  const tabs = user.isSuperAdmin
+    ? [['team', 'All timesheets', Users]]
+    : [['mine', 'My timesheet', UserRound], ...(user.role.code === 'PROJECT_MANAGER' ? [['team', 'Team', Users]] : [])];
   const toast = useToast();
   const queryClient = useQueryClient();
-  const [scope, setScope] = useState('mine');
+  // the Super Admin only reviews time: everyone's entries, no "My timesheet"
+  const [scope, setScope] = useState(user.isSuperAdmin ? 'team' : 'mine');
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
@@ -82,9 +85,10 @@ export default function TimesheetListPage() {
   const [toDelete, setToDelete] = useState(null);
   const debouncedSearch = useDebounce(search);
 
-  const options = useQuery({ queryKey: ['timesheets', 'options'], queryFn: timesheetsApi.options });
   const groups = useMasterOptions('task-groups');
-  const projectOptions = (options.data ?? []).map((p) => ({ value: p.id, label: p.title }));
+  // filter: all projects for the Super Admin, otherwise the projects the user is on
+  const filterProjects = useQuery({ queryKey: ['timesheets', 'filter-projects'], queryFn: timesheetsApi.projects });
+  const projectOptions = (filterProjects.data ?? []).map((p) => ({ value: p.id, label: p.title }));
 
   const range = filters.dateRange ? rangeFor(filters.dateRange) : null;
   const params = {
@@ -143,10 +147,7 @@ export default function TimesheetListPage() {
 
       <div className="page-head">
         <div className="tabs" role="tablist">
-          {[
-            ['mine', 'My timesheet', UserRound],
-            ...(canSeeTeam ? [['team', 'Team', Users]] : []),
-          ].map(([key, label, Icon]) => (
+          {tabs.map(([key, label, Icon]) => (
             <button
               key={key}
               type="button"
