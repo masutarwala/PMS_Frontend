@@ -1,5 +1,6 @@
 import { Suspense, useState } from 'react';
-import { Outlet } from 'react-router';
+import { Outlet, useLocation } from 'react-router';
+import { trackNavigation } from '@/hooks/useSessionState';
 import { Spinner } from '@/components/ui/Loader';
 import { Sidebar } from './Sidebar';
 
@@ -15,6 +16,8 @@ const readCollapsed = () => {
 /** Sidebar + main area. Each page renders its own <Topbar> and content. */
 export function AppLayout() {
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  // lists restore their filters only when coming back from one of their records
+  trackNavigation(useLocation().pathname);
 
   const toggle = () =>
     setCollapsed((c) => {

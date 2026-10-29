@@ -157,7 +157,7 @@ export function ActionMenu({ trigger, items = [], header, alignRight = true, min
       <span ref={toggleRef} style={{ display: 'flex' }}>
         {trigger({ open, toggle: () => setOpen((o) => !o), title })}
       </span>
-      <div className={`dropdown-menu${alignRight ? ' align-right' : ''}`} ref={menuRef}>
+      <div className={`dropdown-menu is-actions${alignRight ? ' align-right' : ''}`} ref={menuRef}>
         {header}
         <div className="dropdown-options">
           {visible.map((item, i) =>

@@ -1,34 +1,36 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowDown, ArrowUp, ArrowUpRight, Building2, Calendar, ChartPie, ChevronRight, ChevronsUpDown, Clock3, Copy, Crown, Download,
-  EllipsisVertical, Eye, FolderKanban, LayoutGrid, Pencil, Plus, Search, SlidersHorizontal, Trash2,
+  ExternalLink, Eye, FolderKanban, LayoutGrid, Pencil, Plus, Search, SlidersHorizontal, Trash2,
   TriangleAlert, UserRound,
 } from 'lucide-react';
 import { projectsApi } from '@/api/endpoints';
 import { errorMessage } from '@/api/client';
 import { usePermissions } from '@/auth/auth-context';
 import { Topbar } from '@/components/layout/Topbar';
-import { ActionMenu, Dropdown } from '@/components/ui/Dropdown';
+import { Dropdown } from '@/components/ui/Dropdown';
 import { Avatar, EmptyState, ErrorAlert, StageBadge, UserCell } from '@/components/ui/Display';
 import { Field, Switch } from '@/components/ui/Field';
 import { DatePicker } from '@/components/ui/DatePicker';
 import {
-  ActiveFilters, BulkBar, CARD_TONES, Drawer, SelectAllCell, SelectRowCell, ViewSwitch, useSelection, useViewMode,
-} from '@/components/ui/ListKit';
+  ActiveFilters, CARD_TONES, Drawer, ViewSwitch, useSelection, useViewMode, SingleFilter } from '@/components/ui/ListKit';
 import { AlertCard, AreaCard, ColumnsCard, KpiSection, PieCard } from '@/components/ui/MetricCards';
 import { ConfirmDeleteModal, Modal } from '@/components/ui/Modal';
 import { TableFoot } from '@/components/ui/Pager';
+import { ColumnPicker, RowMenu, useColumns } from '@/components/ui/ColumnPicker';
 import { TableLoading } from '@/components/ui/Loader';
 import { useToast } from '@/components/ui/toast-context';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useSessionState } from '@/hooks/useSessionState';
 import { useMasterOptions, useStageOptions } from '@/hooks/useOptions';
 import { SCREENS } from '@/lib/constants';
 import { downloadCsv } from '@/lib/csv';
 import { DATE_RANGES, rangeFor } from '@/lib/dates';
 import { formatDate, formatNumber } from '@/lib/format';
 import { ProjectQuickView } from './ProjectQuickView';
+import { todayWeekday } from '@/lib/timezone';
 
 const EMPTY_FILTERS = {
   stageId: [], divisionId: [], typeId: [], ownerId: [], customerId: [], isRetainerProject: null,
@@ -60,7 +62,7 @@ function SortHeader({ label, field, sort, onSort }) {
 
 function ProjectSummary({ s, onFilter, onStage }) {
   const weekTotal = s?.hoursThisMonth.week ?? [];
-  const today = (new Date().getDay() + 6) % 7;
+  const today = todayWeekday(); // Monday = 0, user's time zone
   return (
     <KpiSection storageKey="projects">
       <AreaCard
@@ -145,19 +147,29 @@ function MoreFilters({ open, onClose, filters, onApply }) {
   );
 }
 
+/** Long text in a table cell: cut with … at a fixed width, full text on hover. */
+function Trunc({ text, width = 200 }) {
+  if (!text) return <span className="muted">—</span>;
+  return (
+    <span className="cell-trunc" style={{ maxWidth: width }} title={text}>
+      {text}
+    </span>
+  );
+}
+
 export default function ProjectListPage() {
   const perms = usePermissions(SCREENS.PROJECTS);
   const navigate = useNavigate();
   const toast = useToast();
   const queryClient = useQueryClient();
 
-  const [tab, setTab] = useState('all');
+  const [tab, setTab] = useSessionState('projects.tab', 'all');
   const [view, setView] = useViewMode('projects');
-  const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [sort, setSort] = useState({ by: 'createdAt', dir: 'desc' });
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [search, setSearch] = useSessionState('projects.search', '');
+  const [filters, setFilters] = useSessionState('projects.filters', EMPTY_FILTERS);
+  const [sort, setSort] = useSessionState('projects.sort', { by: 'createdAt', dir: 'desc' });
+  const [page, setPage] = useSessionState('projects.page', 1);
+  const [pageSize, setPageSize] = useSessionState('projects.pageSize', 10);
   const [toDelete, setToDelete] = useState(null); // project or 'bulk'
   const [quick, setQuick] = useState(null);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -180,7 +192,11 @@ export default function ProjectListPage() {
   const selection = useSelection(items);
   const s = summary.data;
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['projects'] });
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['projects'] });
+    queryClient.invalidateQueries({ queryKey: ['tasks', 'options'] }); // status / people feed the task and timesheet forms
+    queryClient.invalidateQueries({ queryKey: ['timesheets'] });
+  };
 
   const remove = useMutation({
     mutationFn: async (ids) => {
@@ -213,10 +229,13 @@ export default function ProjectListPage() {
     },
   });
 
-  const setFilter = (key, value) => {
-    setFilters((f) => ({ ...f, [key]: value }));
-    setPage(1);
-  };
+  const setFilter = useCallback(
+    (key, value) => {
+      setFilters((f) => ({ ...f, [key]: value }));
+      setPage(1);
+    },
+    [setFilters, setPage],
+  );
   const setDateRange = (key) => {
     if (key === 'custom') {
       setMoreOpen(true);
@@ -256,7 +275,7 @@ export default function ProjectListPage() {
     }
     if (filters.overdue) out.push({ key: 'overdue', label: 'Overdue', value: 'Yes', onRemove: () => setFilter('overdue', false) });
     return out;
-  }, [filters]);
+  }, [filters, setFilter, setFilters]);
 
   const exportRows = (rows) =>
     downloadCsv(
@@ -268,19 +287,118 @@ export default function ProjectListPage() {
   const duplicate = (p) => navigate('/projects/new', { state: { duplicateOf: p } });
 
   const rowMenu = (p) => (
-    <ActionMenu
-      trigger={({ toggle, title }) => (
-        <button type="button" className="dropdown-toggle btn btn-ghost btn-icon" style={{ width: 32, height: 32, border: 0, padding: 0, justifyContent: 'center' }} title={title} onClick={toggle}>
-          <EllipsisVertical />
-        </button>
-      )}
+    <RowMenu
       items={[
+        { label: 'Quick view', icon: Eye, onClick: () => setQuick(p) },
+        { label: 'Open details', icon: ExternalLink, onClick: () => navigate(`/projects/${p.id}`) },
+        { label: 'Edit', icon: Pencil, hidden: !perms.edit, onClick: () => navigate(`/projects/${p.id}/edit`) },
         { label: 'Duplicate', icon: Copy, hidden: !perms.create, onClick: () => duplicate(p) },
-        { divider: true, hidden: !perms.create || !perms.delete },
+        { divider: true, hidden: !perms.delete },
         { label: 'Delete', icon: Trash2, danger: true, hidden: !perms.delete, onClick: () => setToDelete(p) },
       ]}
     />
   );
+
+  // table columns – shown / hidden and ordered by the user (Columns button)
+  const columnDefs = [
+    {
+      key: 'title',
+      label: 'Project',
+      locked: true,
+      th: () => <SortHeader key="title" label="Project" field="title" sort={sort} onSort={onSort} />,
+      td: (p) => (
+        <td key="title">
+          <Link className="cell-title" to={`/projects/${p.id}`} style={{ color: 'var(--ink)' }}>
+            {p.title}
+          </Link>
+          <div className="cell-sub">{p.code}</div>
+        </td>
+      ),
+    },
+    {
+      key: 'startDate',
+      label: 'Start date',
+      th: () => <SortHeader key="startDate" label="Start date" field="startDate" sort={sort} onSort={onSort} />,
+      td: (p) => <td key="startDate" className="nowrap">{formatDate(p.startDate)}</td>,
+    },
+    { key: 'client', label: 'Client', td: (p) => <td key="client"><Trunc text={p.customerName} /></td> },
+    { key: 'division', label: 'Project division', defaultHidden: true, td: (p) => <td key="division"><Trunc text={p.divisionName} width={160} /></td> },
+    { key: 'type', label: 'Project type', td: (p) => <td key="type"><Trunc text={p.typeName} width={180} /></td> },
+    {
+      key: 'stage',
+      label: 'Stage',
+      td: (p) => (
+        <td key="stage">
+          <StageBadge name={p.stageName} status={p.status} />
+        </td>
+      ),
+    },
+    {
+      key: 'progress',
+      label: 'Progress',
+      td: (p) => (
+        <td key="progress" style={{ minWidth: 150 }}>
+          <div className="row" style={{ gap: 8 }}>
+            <div className={`progress grow${burnClass(p)}`}>
+              <span style={{ width: `${Math.min(100, p.progress)}%` }} />
+            </div>
+            <span className="small num">{p.progress}%</span>
+          </div>
+        </td>
+      ),
+    },
+    {
+      key: 'lastReview',
+      label: 'Last review',
+      td: (p) => (
+        <td key="lastReview" className="nowrap">
+          {p.lastReviewDate ? formatDate(p.lastReviewDate) : <span className="muted">—</span>}
+        </td>
+      ),
+    },
+    {
+      key: 'info',
+      label: 'Info',
+      td: (p) => (
+        <td key="info" className="pl-comment">
+          {p.lastComment ? (
+            <div className="pl-comment-text" title={p.lastComment}>
+              {p.lastComment}
+            </div>
+          ) : (
+            <span className="muted">—</span>
+          )}
+        </td>
+      ),
+    },
+    {
+      key: 'owner',
+      label: 'Project owner',
+      td: (p) => (
+        <td key="owner">
+          <UserCell name={p.ownerName} />
+        </td>
+      ),
+    },
+    {
+      key: 'endDate',
+      label: 'End date',
+      defaultHidden: true,
+      th: () => <SortHeader key="endDate" label="End date" field="endDate" sort={sort} onSort={onSort} />,
+      td: (p) => <td key="endDate" className="nowrap">{p.endDate ? formatDate(p.endDate) : <span className="muted">—</span>}</td>,
+    },
+    {
+      key: 'hours',
+      label: 'Hours (logged / est.)',
+      className: 'right',
+      td: (p) => (
+        <td key="hours" className="num right">
+          {formatNumber(p.loggedHours)} / {p.estimatedHours != null ? formatNumber(p.estimatedHours) : '—'}
+        </td>
+      ),
+    },
+  ];
+  const cols = useColumns('projects', columnDefs);
 
   const hasFilters = JSON.stringify({ ...filters, dateRange: null }) !== JSON.stringify({ ...EMPTY_FILTERS, dateRange: null });
   const isFiltered = debouncedSearch || hasFilters;
@@ -361,8 +479,8 @@ export default function ProjectListPage() {
             />
           </div>
           <Dropdown pill multi search placeholder="Stage" options={stages.options} value={filters.stageId} onChange={(v) => setFilter('stageId', v)} />
-          <Dropdown pill multi search placeholder="Project division" options={divisions.options} value={filters.divisionId} onChange={(v) => setFilter('divisionId', v)} />
-          <Dropdown pill multi search placeholder="Project type" options={types.options} value={filters.typeId} onChange={(v) => setFilter('typeId', v)} />
+          <SingleFilter search placeholder="Project division" options={divisions.options} value={filters.divisionId} onChange={(v) => setFilter('divisionId', v)} />
+          <SingleFilter search placeholder="Project type" options={types.options} value={filters.typeId} onChange={(v) => setFilter('typeId', v)} />
           <Dropdown
             pill
             clearable
@@ -371,14 +489,15 @@ export default function ProjectListPage() {
             value={filters.isRetainerProject === null ? null : filters.isRetainerProject ? 'yes' : 'no'}
             onChange={(v) => setFilter('isRetainerProject', v === null ? null : v === 'yes')}
           />
-          <Dropdown pill multi search placeholder="Project owner" options={owners.options} value={filters.ownerId} onChange={(v) => setFilter('ownerId', v)} />
-          <Dropdown pill multi search placeholder="Customer" options={customers.options} value={filters.customerId} onChange={(v) => setFilter('customerId', v)} />
+          <SingleFilter search placeholder="Project owner" options={owners.options} value={filters.ownerId} onChange={(v) => setFilter('ownerId', v)} />
+          <SingleFilter search placeholder="Customer" options={customers.options} value={filters.customerId} onChange={(v) => setFilter('customerId', v)} />
           <Dropdown pill clearable placeholder="Date" options={DATE_RANGES} value={filters.dateRange} onChange={(v) => (v ? setDateRange(v) : setFilters((f) => ({ ...f, dateRange: null, startFrom: '', startTo: '' })))} />
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setMoreOpen(true)}>
             <SlidersHorizontal />
             More filters
           </button>
           <span className="spacer" />
+          {view === 'table' && <ColumnPicker cols={cols} />}
           <ViewSwitch value={view} onChange={setView} />
         </div>
 
@@ -391,29 +510,6 @@ export default function ProjectListPage() {
           }}
         />
 
-        <BulkBar count={selection.count}>
-          {perms.edit && (
-            <>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setBulk('owner')}>
-                Change owner
-              </button>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setBulk('stage')}>
-                Change stage
-              </button>
-            </>
-          )}
-          {perms.export && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportRows(items.filter((p) => selection.isSelected(p.id)))}>
-              Export selected
-            </button>
-          )}
-          {perms.delete && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setToDelete('bulk')}>
-              <Trash2 />
-              Delete
-            </button>
-          )}
-        </BulkBar>
 
         {list.isError && (
           <div style={{ padding: '12px 20px 0' }}>
@@ -426,74 +522,16 @@ export default function ProjectListPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <SelectAllCell selection={selection} />
-                  <SortHeader label="Project" field="title" sort={sort} onSort={onSort} />
-                  <SortHeader label="Start date" field="startDate" sort={sort} onSort={onSort} />
-                  <th>Client</th>
-                  <th>Project type</th>
-                  <th>Stage</th>
-                  <th>Progress</th>
-                  <th>Last review</th>
-                  <th>Info</th>
-                  <th>Project owner</th>
-                  <th className="right">Hours (logged / est.)</th>
-                  <th className="col-actions" />
+                  <th className="col-menu" />
+                  {cols.columns.map((c) => (c.th ? c.th() : <th key={c.key} className={c.className}>{c.label}</th>))}
                 </tr>
               </thead>
               <tbody>
-                {list.isLoading && <TableLoading colSpan={12} />}
+                {list.isLoading && <TableLoading colSpan={cols.columns.length + 1} />}
                 {items.map((p) => (
-                  <tr key={p.id} className={selection.isSelected(p.id) ? 'is-selected' : ''}>
-                    <SelectRowCell selection={selection} id={p.id} />
-                    <td>
-                      <Link className="cell-title" to={`/projects/${p.id}`} style={{ color: 'var(--ink)' }}>
-                        {p.title}
-                      </Link>
-                      <div className="cell-sub">{p.code}</div>
-                    </td>
-                    <td className="nowrap">{formatDate(p.startDate)}</td>
-                    <td className="nowrap">{p.customerName ?? '—'}</td>
-                    <td className="nowrap">{p.typeName}</td>
-                    <td>
-                      <StageBadge name={p.stageName} status={p.status} />
-                    </td>
-                    <td style={{ minWidth: 150 }}>
-                      <div className="row" style={{ gap: 8 }}>
-                        <div className={`progress grow${burnClass(p)}`}>
-                          <span style={{ width: `${Math.min(100, p.progress)}%` }} />
-                        </div>
-                        <span className="small num">{p.progress}%</span>
-                      </div>
-                    </td>
-                    <td className="nowrap">{p.lastReviewDate ? formatDate(p.lastReviewDate) : <span className="muted">—</span>}</td>
-                    <td className="pl-comment">
-                      {p.lastComment ? (
-                        <div className="pl-comment-text" title={p.lastComment}>
-                          {p.lastComment}
-                        </div>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    <td>
-                      <UserCell name={p.ownerName} />
-                    </td>
-                    <td className="num right">
-                      {formatNumber(p.loggedHours)} / {p.estimatedHours != null ? formatNumber(p.estimatedHours) : '—'}
-                    </td>
-                    <td className="col-actions">
-                      <div className="row-actions">
-                        <button type="button" className="btn btn-ghost btn-icon" title="Quick view" onClick={() => setQuick(p)}>
-                          <Eye />
-                        </button>
-                        {perms.edit && (
-                          <Link className="btn btn-ghost btn-icon" to={`/projects/${p.id}/edit`} title="Edit">
-                            <Pencil />
-                          </Link>
-                        )}
-                        {rowMenu(p)}
-                      </div>
-                    </td>
+                  <tr key={p.id}>
+                    <td className="col-menu">{rowMenu(p)}</td>
+                    {cols.columns.map((c) => c.td(p))}
                   </tr>
                 ))}
               </tbody>

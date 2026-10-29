@@ -1,6 +1,6 @@
 import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, BadgeCheck, CalendarCheck, ChartPie, CircleCheck, Clock3, FolderKanban, Gauge, LayoutGrid, Sparkles, TriangleAlert, UserRound } from 'lucide-react';
+import { ArrowRight, ChartPie, Clock3, Gauge, LayoutGrid, Sparkles, TriangleAlert } from 'lucide-react';
 import { projectsApi } from '@/api/endpoints';
 import { useAuth } from '@/auth/auth-context';
 import { Topbar } from '@/components/layout/Topbar';
@@ -8,90 +8,12 @@ import { MenuIcon } from '@/components/layout/icons';
 import { ColumnsCard, DonutCard, GaugeCard, WatermarkCard } from '@/components/ui/MetricCards';
 import { PERMISSION_ACTIONS, SCREENS } from '@/lib/constants';
 import { formatNumber } from '@/lib/format';
+import { todayWeekday } from '@/lib/timezone';
 
 const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-const todayIndex = () => (new Date().getDay() + 6) % 7; // Monday = 0
+const todayIndex = todayWeekday; // Monday = 0, in the user's time zone
 
 const plural = (n, word) => `${word}${n === 1 ? '' : 's'}`;
-
-/** Greeting banner from the design (Screens/index.html `.hello`). */
-function Hello({ user, s }) {
-  const week = s?.hoursThisMonth.week ?? [];
-  const weekHours = week.reduce((a, b) => a + b, 0);
-  const todayHours = week[todayIndex()] ?? 0;
-  const month = s?.hoursThisMonth;
-  const billablePct = month?.total ? Math.round((month.billable / month.total) * 100) : 0;
-  const date = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-
-  return (
-    <div className="hello">
-      <div>
-        <div className="date">{date}</div>
-        {s ? (
-          <p>
-            You have <b>{formatNumber(s.active)} active {plural(s.active, 'project')}</b>
-            {s.overdue > 0 ? (
-              <>
-                {' '}
-                and <b>{formatNumber(s.overdue)} past {s.overdue === 1 ? 'its' : 'their'} end date</b>
-              </>
-            ) : null}
-            . Your team logged <b>{formatNumber(month.total)} hours</b> this month
-            {month.total > 0 ? (
-              <>
-                {' '}
-                – <b>{billablePct}%</b> of it billable
-              </>
-            ) : null}
-            .
-          </p>
-        ) : (
-          <p>
-            Signed in as <b>{user.role.name}</b>. Pick a screen below to get started.
-          </p>
-        )}
-        {s && (
-          <div className="pills">
-            <span className="pill">
-              <span className="i">
-                <FolderKanban />
-              </span>
-              <b>{formatNumber(s.active)}</b> active projects
-            </span>
-            <span className="pill">
-              <span className="i">
-                <UserRound />
-              </span>
-              <b>{formatNumber(s.mine)}</b> my projects
-            </span>
-            <span className="pill">
-              <span className="i">
-                <CalendarCheck />
-              </span>
-              <b>{formatNumber(weekHours)}h</b> logged this week
-            </span>
-          </div>
-        )}
-      </div>
-      <div className="hello-art" aria-hidden="true">
-        <span className="blob b1" />
-        <span className="blob b2" />
-        <span className="note n1">
-          <CircleCheck />
-          {s ? `${formatNumber(s.byStatus.completed)} completed` : user.role.name}
-        </span>
-        <span className="note n2">
-          <Clock3 />
-          {formatNumber(todayHours)}h logged today
-        </span>
-        <span className="note n3">
-          <BadgeCheck />
-          {user.role.name}
-        </span>
-      </div>
-    </div>
-  );
-}
 
 function ProjectCards({ s }) {
   const open = s.total - s.byStatus.completed - s.byStatus.cancelled;
@@ -213,14 +135,13 @@ function ModuleCards({ menus, can }) {
 }
 
 export default function OverviewPage() {
-  const { user, can, session } = useAuth();
+  const { can, session } = useAuth();
   const canProjects = can(SCREENS.PROJECTS, 'view');
   const { data: s } = useQuery({ queryKey: ['projects', 'summary'], queryFn: projectsApi.summary, enabled: canProjects });
 
   return (
     <>
       <Topbar title="Overview" breadcrumb={['emQube PMS']} />
-      <Hello user={user} s={canProjects ? s : null} />
       {canProjects && s && (
         <>
           <ProjectCards s={s} />

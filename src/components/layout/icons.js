@@ -2,6 +2,8 @@ import { createElement } from 'react';
 import {
   Building2,
   CalendarRange,
+  ClipboardList,
+  ListOrdered,
   Clock3,
   FolderKanban,
   LayoutDashboard,
@@ -17,6 +19,8 @@ import {
 const ICONS = {
   'building-2': Building2,
   'calendar-range': CalendarRange,
+  'clipboard-list': ClipboardList,
+  'list-ordered': ListOrdered,
   'clock-3': Clock3,
   'folder-kanban': FolderKanban,
   'layout-dashboard': LayoutDashboard,

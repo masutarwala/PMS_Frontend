@@ -21,3 +21,16 @@ export function usePermissions(screen) {
     export: !!p.export,
   };
 }
+
+/**
+ * The user's access to the project tabs and Project-tab fields (Roles & Permissions → Project access):
+ * tab('users') / field('estimatedAmount') → 'hidden' | 'view' | 'edit'.
+ */
+export function useProjectAccess() {
+  const { session } = useAuth();
+  const a = session?.projectAccess;
+  return {
+    tab: (key) => a?.tabs?.[key] ?? 'edit',
+    field: (key) => a?.fields?.[key] ?? 'edit',
+  };
+}

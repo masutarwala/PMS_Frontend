@@ -1,25 +1,49 @@
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowUpRight, ChevronRight, Download, EllipsisVertical, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { ArrowUpRight, ChevronRight, Download, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { configApi } from '@/api/endpoints';
 import { errorMessage } from '@/api/client';
 import { usePermissions } from '@/auth/auth-context';
 import { Topbar } from '@/components/layout/Topbar';
-import { ActionMenu, Dropdown } from '@/components/ui/Dropdown';
+import { Dropdown } from '@/components/ui/Dropdown';
 import { EmptyState, ErrorAlert } from '@/components/ui/Display';
-import { BulkBar, CARD_TONES, SelectAllCell, SelectRowCell, ViewSwitch, useSelection, useViewMode } from '@/components/ui/ListKit';
+import { CARD_TONES, ViewSwitch, useSelection, useViewMode } from '@/components/ui/ListKit';
 import { ConfirmDeleteModal } from '@/components/ui/Modal';
 import { TableFoot } from '@/components/ui/Pager';
+import { ColumnPicker, RowMenu, useColumns } from '@/components/ui/ColumnPicker';
 import { TableLoading } from '@/components/ui/Loader';
 import { useToast } from '@/components/ui/toast-context';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useSessionState } from '@/hooks/useSessionState';
 import { useOptionsFrom } from '@/hooks/useOptions';
 import { downloadCsv } from '@/lib/csv';
 import { CustomerSummary } from './CustomerSummary';
 
 const SUMMARIES = { customers: CustomerSummary };
 const text = (v) => (v === null || v === undefined ? '' : typeof v === 'object' ? '' : String(v));
+
+/** The value of a static option that matches the given text (for filters coming from the URL). */
+const matchOption = (options, raw) => options.find((o) => String(o.value) === String(raw))?.value ?? raw;
+
+/** Filters the screen was opened with, e.g. /administration/task-types?taskGroupId=3 */
+function filtersFromUrl(def, searchParams) {
+  const out = {};
+  for (const f of def.filters) {
+    const raw = searchParams.get(f.key);
+    if (raw === null || raw === '') continue;
+    if (f.multi) {
+      const vals = raw
+        .split(',')
+        .filter(Boolean)
+        .map((v) => (f.options ? matchOption(f.options, v) : /^\d+$/.test(v) ? Number(v) : v));
+      if (vals.length) out[f.key] = vals;
+    } else {
+      out[f.key] = f.options ? matchOption(f.options, raw) : raw;
+    }
+  }
+  return out;
+}
 
 /** One filter pill; options come from the screen definition. */
 function FilterPill({ filter, value, onChange }) {
@@ -29,10 +53,10 @@ function FilterPill({ filter, value, onChange }) {
       pill
       multi={filter.multi}
       clearable={!filter.multi}
-      search={filter.multi && options.length > 6}
+      search={options.length > 6}
       placeholder={filter.placeholder}
       options={options}
-      value={value}
+      value={!filter.multi && Array.isArray(value) ? (value[0] ?? null) : value /* a list saved before the filter became single */}
       onChange={onChange}
     />
   );
@@ -61,17 +85,23 @@ function Chip({ filter, value, onRemove }) {
  * List screen for a configuration master (see screens.jsx), laid out like every list in the design:
  * filter bar → active filters → bulk bar → table / cards / list → footer.
  */
-export default function ConfigListPage({ def }) {
+export default function ConfigListPage({ def, embedded = false, onRows }) {
   const perms = usePermissions(def.screen);
+  const navigate = useNavigate();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const api = useMemo(() => configApi(def.key), [def.key]);
+  const api = useMemo(() => configApi(def.apiKey ?? def.key), [def.apiKey, def.key]); // apiKey: a tab over another screen's API
 
   const [view, setView] = useViewMode(def.key);
-  const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState({});
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [search, setSearch] = useSessionState(`${def.key}.search`, '', { keep: def.keepState });
+  // filters the screen was opened with (a link from another screen) are the starting filters
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlFilters = filtersFromUrl(def, searchParams);
+  const [storedFilters, setStoredFilters] = useSessionState(`${def.key}.filters`, urlFilters, { keep: def.keepState });
+  // a filter in the URL wins over the remembered one
+  const filters = { ...storedFilters, ...urlFilters };
+  const [page, setPage] = useSessionState(`${def.key}.page`, 1, { keep: def.keepState });
+  const [pageSize, setPageSize] = useSessionState(`${def.key}.pageSize`, 10, { keep: def.keepState });
   const [toDelete, setToDelete] = useState(null); // row or 'bulk'
   const debouncedSearch = useDebounce(search);
 
@@ -80,6 +110,11 @@ export default function ConfigListPage({ def }) {
   const items = useMemo(() => list.data?.items ?? [], [list.data]);
   const total = list.data?.total ?? 0;
   const selection = useSelection(items);
+
+  // a page that hosts this list in a tab (Task Groups & Types) shows the rows in its own header
+  useEffect(() => {
+    onRows?.(items, total);
+  }, [items, total, onRows]);
 
   const remove = useMutation({
     mutationFn: async (ids) => {
@@ -99,18 +134,49 @@ export default function ConfigListPage({ def }) {
   });
 
   const setFilter = (key, value) => {
-    setFilters((f) => {
+    setStoredFilters((f) => {
       const n = { ...f };
       if (value === null || value === undefined || (Array.isArray(value) && !value.length)) delete n[key];
       else n[key] = value;
       return n;
     });
+    dropUrlFilter(key);
+    setPage(1);
+  };
+
+  /** Takes a filter out of the URL, so it does not come back on the next visit. */
+  const dropUrlFilter = (key) => {
+    if (!searchParams.has(key)) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete(key);
+    setSearchParams(next, { replace: true });
+  };
+
+  const clearFilters = () => {
+    setStoredFilters({});
+    if ([...searchParams.keys()].length) setSearchParams(new URLSearchParams(), { replace: true });
     setPage(1);
   };
 
   const titleCol = def.columns.find((c) => c.title) ?? def.columns[0];
-  const otherCols = def.columns.filter((c) => c !== titleCol);
-  const editUrl = (r) => `${def.screen}/${r.id}/edit`;
+  const base = def.path ?? def.screen;
+  const editUrl = (r) => `${base}/${r.id}/edit`;
+  // table columns – shown / hidden and ordered by the user (Columns button); the name column always shows
+  const cols = useColumns(
+    def.key,
+    def.columns.map((c) => ({ ...c, locked: c === titleCol })),
+  );
+  const rowMenu = (r) => (
+    <RowMenu
+      items={[
+        // extra actions the screen defines (e.g. "Task types" of a task group)
+        ...(def.rowActions?.(r) ?? []).map((a) => ({ ...a, onClick: a.onClick ?? (() => navigate(a.to)) })),
+        { label: def.editLabel ?? 'Edit', icon: Pencil, hidden: !perms.edit || def.canEdit?.(r) === false, onClick: () => navigate(editUrl(r)) },
+        { divider: true, hidden: !perms.delete || def.noDelete },
+        { label: 'Delete', icon: Trash2, danger: true, hidden: !perms.delete || def.noDelete, onClick: () => setToDelete(r) },
+      ]}
+    />
+  );
   const cellValue = (c, r) => (c.render ? c.render(r) : r[c.key] ?? '—');
 
   const exportRows = (rows) =>
@@ -126,26 +192,34 @@ export default function ConfigListPage({ def }) {
 
   return (
     <>
-      <Topbar
-        title={def.title}
-        breadcrumb={[def.breadcrumb ?? 'Administration']}
-        actions={
-          <>
-            {perms.export && (
-              <button type="button" className="btn btn-secondary" disabled={!items.length} onClick={() => exportRows(items)}>
-                <Download />
-                Export
-              </button>
-            )}
-            {perms.create && (
-              <Link className="btn btn-primary" to={`${def.screen}/new`}>
-                <Plus />
-                New {def.singular}
-              </Link>
-            )}
-          </>
-        }
-      />
+      {!embedded && (
+        <Topbar
+          title={def.title}
+          breadcrumb={[def.breadcrumb ?? 'Administration']}
+          actions={
+            <>
+              {perms.export && (
+                <button type="button" className="btn btn-secondary" disabled={!items.length} onClick={() => exportRows(items)}>
+                  <Download />
+                  Export
+                </button>
+              )}
+              {perms.create && def.extraCreate && (
+                <Link className="btn btn-secondary" to={def.extraCreate.to}>
+                  <Plus />
+                  {def.extraCreate.label}
+                </Link>
+              )}
+              {perms.create && (
+                <Link className="btn btn-primary" to={`${base}/new`}>
+                  <Plus />
+                  New {def.singular}
+                </Link>
+              )}
+            </>
+          }
+        />
+      )}
 
       {Summary && <Summary />}
 
@@ -167,6 +241,7 @@ export default function ConfigListPage({ def }) {
             <FilterPill key={f.key} filter={f} value={filters[f.key] ?? (f.multi ? [] : null)} onChange={(v) => setFilter(f.key, v)} />
           ))}
           <span className="spacer" />
+          {view === 'table' && <ColumnPicker cols={cols} />}
           <ViewSwitch value={view} onChange={setView} />
         </div>
 
@@ -180,29 +255,13 @@ export default function ConfigListPage({ def }) {
             <button
               type="button"
               className="clear"
-              onClick={() => {
-                setFilters({});
-                setPage(1);
-              }}
+              onClick={clearFilters}
             >
               Clear all
             </button>
           </div>
         )}
 
-        <BulkBar count={selection.count}>
-          {perms.export && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportRows(items.filter((r) => selection.isSelected(r.id)))}>
-              Export selected
-            </button>
-          )}
-          {perms.delete && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setToDelete('bulk')}>
-              <Trash2 />
-              Delete
-            </button>
-          )}
-        </BulkBar>
 
         {list.isError && (
           <div style={{ padding: '12px 20px 0' }}>
@@ -215,52 +274,37 @@ export default function ConfigListPage({ def }) {
             <table className="data-table">
               <thead>
                 <tr>
-                  <SelectAllCell selection={selection} />
-                  {def.columns.map((c) => (
+                  <th className="col-menu" />
+                  {cols.columns.map((c) => (
                     <th key={c.key} className={c.className?.includes('right') ? 'right' : ''}>
                       {c.label}
                     </th>
                   ))}
-                  <th className="col-actions" />
                 </tr>
               </thead>
               <tbody>
-                {list.isLoading && <TableLoading colSpan={def.columns.length + 2} />}
+                {list.isLoading && <TableLoading colSpan={cols.columns.length + 1} />}
                 {items.map((r) => (
-                  <tr key={r.id} className={selection.isSelected(r.id) ? 'is-selected' : ''}>
-                    <SelectRowCell selection={selection} id={r.id} />
-                    <td>
-                      {perms.edit ? (
-                        <Link className="cell-title" to={editUrl(r)} style={{ color: 'var(--ink)' }}>
-                          {r[titleCol.key]}
-                        </Link>
-                      ) : (
-                        <span className="cell-title">{r[titleCol.key]}</span>
-                      )}
-                      {titleCol.sub && <div className="cell-sub">{titleCol.sub(r)}</div>}
-                    </td>
-                    {otherCols.map((c) => (
-                      <td key={c.key} className={c.className ?? 'nowrap'}>
-                        {cellValue(c, r)}
-                      </td>
-                    ))}
-                    <td className="col-actions">
-                      <div className="row-actions">
-                        {perms.edit && (
-                          <Link className="btn btn-ghost btn-icon" to={editUrl(r)} title="Edit">
-                            <Pencil />
-                          </Link>
-                        )}
-                        <ActionMenu
-                          trigger={({ toggle, title }) => (
-                            <button type="button" className="dropdown-toggle btn btn-ghost btn-icon" style={{ width: 32, height: 32, border: 0, padding: 0, justifyContent: 'center' }} title={title} onClick={toggle}>
-                              <EllipsisVertical />
-                            </button>
+                  <tr key={r.id}>
+                    <td className="col-menu">{rowMenu(r)}</td>
+                    {cols.columns.map((c) =>
+                      c.key === titleCol.key ? (
+                        <td key={c.key}>
+                          {perms.edit && def.canEdit?.(r) !== false ? (
+                            <Link className="cell-title" to={editUrl(r)} style={{ color: 'var(--ink)' }}>
+                              {r[titleCol.key]}
+                            </Link>
+                          ) : (
+                            <span className="cell-title">{r[titleCol.key]}</span>
                           )}
-                          items={[{ label: 'Delete', icon: Trash2, danger: true, hidden: !perms.delete, onClick: () => setToDelete(r) }]}
-                        />
-                      </div>
-                    </td>
+                          {titleCol.sub && <div className="cell-sub">{titleCol.sub(r)}</div>}
+                        </td>
+                      ) : (
+                        <td key={c.key} className={c.className ?? 'nowrap'}>
+                          {cellValue(c, r)}
+                        </td>
+                      ),
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -336,8 +380,8 @@ export default function ConfigListPage({ def }) {
             icon={def.icon}
             title={isFiltered ? `No ${def.title.toLowerCase()} match your filters` : `No ${def.singular}s yet`}
             action={
-              perms.create && !isFiltered && (
-                <Link className="btn btn-primary" to={`${def.screen}/new`}>
+              perms.create && !def.noCreate && !isFiltered && (
+                <Link className="btn btn-primary" to={`${base}/new`}>
                   <Plus />
                   New {def.singular}
                 </Link>

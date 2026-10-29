@@ -1,24 +1,18 @@
+import { useState } from 'react';
 import { Link } from 'react-router';
+import { usePermissions, useProjectAccess } from '@/auth/auth-context';
 import { useQuery } from '@tanstack/react-query';
-import { CircleCheck, CircleX, Clock3, ExternalLink, Pencil, RefreshCw, Target, UserCog, Users } from 'lucide-react';
+import { CircleCheck, CircleX, Clock3, ExternalLink, ListChecks, Target, Users } from 'lucide-react';
 import { projectsApi } from '@/api/endpoints';
 import { Avatar, EmptyState } from '@/components/ui/Display';
 import { Spinner } from '@/components/ui/Loader';
 import { formatDate, formatDateTime, formatMoney, formatNumber } from '@/lib/format';
+import { SCREENS } from '@/lib/constants';
+import { PriorityBadge, StatusBadge, SubtaskCount, TaskPeople, TaskTimeline } from '@/pages/tasks/TaskListPage';
 import { stageChange } from '../stageChange';
-import { AccessBadge, AccessTiles, ColorDot, CommentsLog, EffortSplit, GradeTag, MemberCell, pct, ReviewGrid } from './shared';
+import { ColorDot, CommentsLog, EffortSplit, MemberCell } from './shared';
 
-/** "Edit" style link into the edit page on a given tab. */
-function EditLink({ id, tab, icon: Icon = Pencil, children }) {
-  return (
-    <div className="actions">
-      <Link className="btn btn-soft btn-sm" to={`/projects/${id}/edit#${tab}`}>
-        <Icon />
-        {children}
-      </Link>
-    </div>
-  );
-}
+// One Edit button only: the header's Edit opens the edit page on the tab being viewed (no Edit per card).
 
 function CardHead({ title, sub, children }) {
   return (
@@ -32,88 +26,25 @@ function CardHead({ title, sub, children }) {
   );
 }
 
-/* ------------------------------------------------------------------ Update */
-
-export function UpdateView({ p, reviews, canEdit }) {
-  const progress = reviews ? reviews.filter((r) => r.groups.length > 0) : undefined;
-  const comments = reviews ? reviews.filter((r) => r.comment) : [];
-  const latest = progress?.[0];
-  const add = canEdit && <EditLink id={p.id} tab="update">Update progress</EditLink>;
-  return (
-    <>
-      <div className="card card-flush" style={{ marginTop: 16 }}>
-        <CardHead title="Current status" sub="From the latest review.">
-          {add}
-        </CardHead>
-        <div style={{ padding: '16px 20px 20px' }}>
-          <div className="upd-summary">
-            <div>
-              <span className="muted small">Stage</span>
-              <b>{p.stageName ?? '—'}</b>
-            </div>
-            <div style={{ flex: 1.4 }}>
-              <span className="muted small">Overall progress</span>
-              <div className="row" style={{ gap: 10, marginTop: 4 }}>
-                <div className="progress grow">
-                  <span style={{ width: `${Math.min(100, p.progress)}%` }} />
-                </div>
-                <b className="num">{p.progress}%</b>
-              </div>
-            </div>
-            <div>
-              <span className="muted small">Last review</span>
-              <b>{latest ? formatDate(latest.reviewDate) : '—'}</b>
-            </div>
-            <div>
-              <span className="muted small">Reviewed by</span>
-              <b>{latest?.reviewerName ?? '—'}</b>
-            </div>
-          </div>
-        </div>
-      </div>
-      {reviews === undefined ? (
-        <Spinner />
-      ) : progress.length === 0 && comments.length === 0 ? (
-        <div className="card" style={{ marginTop: 16 }}>
-          <EmptyState icon={RefreshCw} title="No reviews yet">
-            {canEdit ? 'Add the first review to track the stage and the % completed per task group.' : 'Nobody has reviewed this project yet.'}
-          </EmptyState>
-        </div>
-      ) : (
-        <div className="rv-layout">
-          <div className="card card-flush" style={{ marginTop: 16 }}>
-            <CardHead title="Progress by task group" sub={`${progress.length} entr${progress.length === 1 ? 'y' : 'ies'} · newest first · % completed per task group`}>
-              {add}
-            </CardHead>
-            <div style={{ padding: '16px 20px 20px' }}>
-              {progress.length ? <ReviewGrid reviews={progress} estimates={p.estimates} /> : <p className="muted small">No progress entered yet.</p>}
-            </div>
-          </div>
-          <div className="card card-flush" style={{ marginTop: 16 }}>
-            <CardHead title="Comments" sub="Latest first" />
-            <div style={{ padding: '16px 20px 20px' }}>
-              <CommentsLog reviews={comments} />
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
 /* ------------------------------------------------------------------ Project */
 
-export function ProjectView({ p, canEdit }) {
+export function ProjectView({ p }) {
   const others = p.members.filter((m) => !m.isOwner);
+  const { field } = useProjectAccess();
+  const shown = (key) => field(key) !== 'hidden'; // Roles & Permissions → Project access
   return (
     <div className="detail-layout" style={{ marginTop: 0 }}>
       <div>
         <div className="card card-flush" style={{ marginTop: 16 }}>
-          <CardHead title="Project details">{canEdit && <EditLink id={p.id} tab="project">Edit</EditLink>}</CardHead>
+          <CardHead title="Project details" />
           <div style={{ padding: '16px 20px 20px' }}>
             <dl className="kv">
-              <dt>Customer</dt>
-              <dd>{p.customerName ?? '—'}</dd>
+              {shown('customerId') && (
+                <>
+                  <dt>Customer</dt>
+                  <dd>{p.customerName ?? '—'}</dd>
+                </>
+              )}
               <dt>Project owner</dt>
               <dd>
                 <span className="row" style={{ gap: 8 }}>
@@ -129,19 +60,20 @@ export function ProjectView({ p, canEdit }) {
               <dd>{p.typeName}</dd>
               <dt>Start date</dt>
               <dd>{formatDate(p.startDate)}</dd>
-              <dt>End date</dt>
-              <dd>{formatDate(p.endDate)}</dd>
-              <dt>Total estimate amount</dt>
-              <dd>
-                {p.estimatedAmount != null ? (
-                  <>
-                    {formatMoney(p.estimatedAmount, p.estimatedAmountCurrency || 'INR')} <span className="muted">{p.estimatedAmountCurrency}</span>
-                  </>
-                ) : (
-                  '—'
-                )}
-              </dd>
-              <dt>SharePoint link</dt>
+              {shown('endDate') && (
+                <>
+                  <dt>End date</dt>
+                  <dd>{formatDate(p.endDate)}</dd>
+                </>
+              )}
+              {shown('estimatedAmount') && (
+                <>
+                  <dt>Total amount</dt>
+                  <dd>{p.estimatedAmount != null ? formatMoney(p.estimatedAmount, p.estimatedAmountCurrency || 'INR') : '—'}</dd>
+                </>
+              )}
+              {shown('sharepointLink') && <dt>SharePoint link</dt>}
+              {shown('sharepointLink') && (
               <dd>
                 {p.sharepointLink ? (
                   <a href={p.sharepointLink} target="_blank" rel="noreferrer">
@@ -151,17 +83,33 @@ export function ProjectView({ p, canEdit }) {
                   '—'
                 )}
               </dd>
-              <dt>Retainer project</dt>
+              )}
+              {shown('isRetainerProject') && <dt>Retainer project</dt>}
+              {shown('isRetainerProject') && (
               <dd>
                 <span className="row" style={{ gap: 6 }}>
                   {p.isRetainerProject ? <CircleCheck className="yes-ico" /> : <CircleX className="muted" />}
                   {p.isRetainerProject ? 'Yes' : 'No'}
                 </span>
               </dd>
-              <dt>Project details</dt>
+              )}
+              {shown('isBillable') && <dt>Billable project</dt>}
+              {shown('isBillable') && (
               <dd>
-                <span style={{ fontWeight: 500, color: 'var(--ink-2)', whiteSpace: 'pre-wrap' }}>{p.detail || '—'}</span>
+                <span className="row" style={{ gap: 6 }}>
+                  {p.isBillable ? <CircleCheck className="yes-ico" /> : <CircleX className="muted" />}
+                  {p.isBillable ? 'Yes' : 'No'}
+                </span>
               </dd>
+              )}
+              {shown('detail') && (
+                <>
+                  <dt>Project details</dt>
+                  <dd>
+                    <span style={{ fontWeight: 500, color: 'var(--ink-2)', whiteSpace: 'pre-wrap' }}>{p.detail || '—'}</span>
+                  </dd>
+                </>
+              )}
             </dl>
           </div>
         </div>
@@ -219,22 +167,14 @@ export function ProjectView({ p, canEdit }) {
 
 export const memberSub = (m) => m.position ?? (m.isOwner ? 'Project owner' : m.teamName);
 
-export function UsersView({ p, canEdit }) {
-  const cur = p.estimatedAmountCurrency || 'INR';
+export function UsersView({ p }) {
   return (
     <div className="card card-flush" style={{ marginTop: 16 }}>
       <CardHead
         title="Project members"
-        sub={`${p.members.length} ${p.members.length === 1 ? 'person' : 'people'} on this project and what they can see or do.`}
-      >
-        {canEdit && (
-          <EditLink id={p.id} tab="users" icon={UserCog}>
-            Manage members
-          </EditLink>
-        )}
-      </CardHead>
+        sub={`${p.members.length} ${p.members.length === 1 ? 'person' : 'people'} on this project.`}
+      />
       <div style={{ padding: '16px 20px 20px' }}>
-        <AccessTiles />
         {p.members.length ? (
           <div className="editor">
             <div className="table-wrap" style={{ borderTop: 0 }}>
@@ -242,9 +182,7 @@ export function UsersView({ p, canEdit }) {
                 <thead>
                   <tr>
                     <th>Member</th>
-                    <th>Grade</th>
-                    <th className="right">Cost per hour</th>
-                    <th style={{ paddingLeft: 32 }}>Access</th>
+                    <th className="right">Logged</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -253,22 +191,7 @@ export function UsersView({ p, canEdit }) {
                       <td>
                         <MemberCell name={m.name} sub={memberSub(m)} />
                       </td>
-                      <td>
-                        <GradeTag grade={m.gradeName} team={m.teamName} />
-                      </td>
-                      <td className="num right">
-                        {m.costPerHour != null ? (
-                          <>
-                            {formatMoney(m.costPerHour, m.currency || cur)}
-                            <span className="muted"> /hr</span>
-                          </>
-                        ) : (
-                          <span className="muted">Not set</span>
-                        )}
-                      </td>
-                      <td style={{ paddingLeft: 32 }}>
-                        <AccessBadge level={m.accessLevel} />
-                      </td>
+                      <td className="num right">{formatNumber(m.loggedHours)}h</td>
                     </tr>
                   ))}
                 </tbody>
@@ -285,19 +208,45 @@ export function UsersView({ p, canEdit }) {
 
 /* ------------------------------------------------------------------ Estimate */
 
+/** Hours from the quote: total amount ÷ the division's quote rate per hour (2 decimals, as stored). */
+export const quotedHours = (amount, rate) => (amount != null && amount !== '' && rate ? Math.round((Number(amount) / rate) * 100) / 100 : null);
+
+/**
+ * Total amount, quote rate and estimated hours. The quote (amount ÷ rate) is the default for the hours;
+ * the hours themselves can be changed – `hoursInput` is the editable field on the edit page.
+ */
+export function EstimateTotals({ amount, currency, rate, hours, hoursInput }) {
+  const quoted = quotedHours(amount, rate);
+  const box = (label, value, sub) => (
+    <div className="est-total">
+      <span className="muted small">{label}</span>
+      <b style={{ fontSize: 16 }}>{value}</b>
+      {sub && <span className="muted small">{sub}</span>}
+    </div>
+  );
+  return (
+    <div className="row" style={{ gap: 28, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      {box('Total amount', amount != null && amount !== '' ? formatMoney(Number(amount), currency || 'INR') : 'Not set')}
+      {box('Quote rate per hour', rate ? `${formatMoney(rate, currency || 'INR')} / hr` : 'Not set', rate ? 'from the business division' : `no ${currency || ''} rate in the division`)}
+      {hoursInput ??
+        box(
+          'Total estimated hours',
+          hours != null ? `${formatNumber(hours)} hrs` : 'Not set',
+          hours != null && quoted != null && hours !== quoted ? `set by hand · quote gives ${formatNumber(quoted)} hrs` : quoted != null ? 'total amount ÷ quote rate' : hours != null ? 'entered by hand' : undefined,
+        )}
+    </div>
+  );
+}
+
 export function EstimateView({ p, canEdit }) {
   const total = p.estimates.reduce((s, e) => s + e.effortPercentage, 0);
   const full = Math.abs(total - 100) < 0.01;
   return (
     <div className="card card-flush" style={{ marginTop: 16 }}>
       <CardHead title="Estimate" sub="Share of effort per task group; hours are calculated from the total.">
-        {canEdit && <EditLink id={p.id} tab="estimate">Edit</EditLink>}
       </CardHead>
       <div className="row between" style={{ padding: '16px 20px 12px' }}>
-        <span>
-          <span className="muted">Total estimated hours</span>{' '}
-          <b style={{ fontSize: 16, marginLeft: 6 }}>{p.estimatedHours != null ? `${formatNumber(p.estimatedHours)} hrs` : 'Not set'}</b>
-        </span>
+        <EstimateTotals amount={p.estimatedAmount} currency={p.estimatedAmountCurrency} rate={p.quoteRatePerHour} hours={p.estimatedHours} />
         {p.estimates.length > 0 && <span className={`badge ${full ? 'badge-success' : 'badge-danger'}`}>{formatNumber(total)}% allocated</span>}
       </div>
       {p.estimates.length ? (
@@ -337,7 +286,7 @@ export function EstimateView({ p, canEdit }) {
         </div>
       ) : (
         <EmptyState icon={Target} title="No estimate yet">
-          {canEdit ? 'Edit the estimate to split the effort across task groups.' : 'The effort split has not been set.'}
+          {canEdit ? 'Use Edit (top right) to split the effort across task groups.' : 'The effort split has not been set.'}
         </EmptyState>
       )}
     </div>
@@ -346,174 +295,101 @@ export function EstimateView({ p, canEdit }) {
 
 /* ------------------------------------------------------------------ Analysis */
 
-function CostVsEstimate({ p, cost }) {
-  const cur = p.estimatedAmountCurrency || 'INR';
-  const est = p.estimatedAmount;
-  const used = est ? (cost / est) * 100 : null;
-  const tone = used == null ? '' : used > 100 ? 'danger' : used >= 85 ? 'warning' : 'success';
-  const label = used == null ? 'No estimate amount' : used > 100 ? 'Over estimate amount' : used >= 85 ? 'Close to estimate amount' : 'Within estimate amount';
-  const tile = (title, value, green) => (
-    <div className="tile" style={{ boxShadow: 'none', background: green ? 'var(--green-50)' : 'var(--surface-2)' }}>
-      <div className="muted small">{title}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, marginTop: 4, color: green ? 'var(--green-800)' : undefined }}>{value}</div>
-    </div>
-  );
-  return (
-    <div className="card card-lg" style={{ marginTop: 16 }}>
-      <div className="row between wrap" style={{ gap: 12, marginBottom: 16 }}>
-        <div>
-          <h3 style={{ fontSize: 16 }}>Cost vs estimate amount</h3>
-          <div className="muted small">Cost of all users (hours × rate) compared with the project&apos;s total estimate amount.</div>
-        </div>
-        <span className={`badge${tone ? ` badge-${tone}` : ''}`}>{label}</span>
-      </div>
-      <div className="grid grid-4" style={{ gap: 12 }}>
-        {tile('Estimate amount', est != null ? formatMoney(est, cur) : '—')}
-        {tile('Cost so far', formatMoney(cost, cur))}
-        {tile('Remaining', est != null ? formatMoney(est - cost, cur) : '—', est != null && est >= cost)}
-        {tile('Value used', used != null ? `${formatNumber(Math.round(used * 100) / 100)}%` : '—')}
-      </div>
-      {est != null && (
-        <>
-          <div className={`progress${tone === 'success' ? '' : ` is-${tone}`}`} style={{ height: 12, marginTop: 16 }}>
-            <span style={{ width: `${Math.min(100, used)}%` }} />
-          </div>
-          <div className="row between small muted" style={{ marginTop: 6 }}>
-            <span>{formatMoney(0, cur)}</span>
-            <span>Estimate amount {formatMoney(est, cur)}</span>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-export function AnalysisView({ p, canEdit }) {
-  const totalActual = p.estimates.reduce((s, e) => s + e.actualHours, 0);
-  const cur = p.estimatedAmountCurrency || 'INR';
-  const mh = p.memberHours;
-  const totalHours = mh.reduce((s, m) => s + m.hours, 0);
-  const totalCost = mh.reduce((s, m) => s + (m.cost ?? 0), 0);
-  const rated = mh.filter((m) => m.rate != null);
-  const avgRate = rated.length ? rated.reduce((s, m) => s + m.rate, 0) / rated.length : null;
+export function AnalysisView({ p }) {
+  // per task group: planned hours, actual hours (timesheets), used %, reported % (Update tab) and the variance
+  const rows = p.estimates.map((e) => {
+    const used = e.hours ? Math.round((e.actualHours / e.hours) * 1000) / 10 : null;
+    return {
+      taskGroupId: e.taskGroupId,
+      name: e.taskGroupName,
+      planned: e.hours,
+      actual: e.actualHours,
+      used,
+      reported: e.reportedPercentage ?? 0,
+      variance: used != null ? Math.round((used - (e.reportedPercentage ?? 0)) * 10) / 10 : null,
+    };
+  });
+  const planned = rows.reduce((x, r) => x + (r.planned ?? 0), 0);
+  const actual = rows.reduce((x, r) => x + r.actual, 0);
+  // the reported % of the whole project: each group counts by its planned hours (its share of the effort when there are no hours)
+  const weight = (e) => (planned ? (e.hours ?? 0) : e.effortPercentage);
+  const weights = p.estimates.reduce((x, e) => x + weight(e), 0);
+  const reportedAll = weights ? Math.round((p.estimates.reduce((x, e) => x + weight(e) * (e.reportedPercentage ?? 0), 0) / weights) * 10) / 10 : 0;
+  const usedAll = planned ? Math.round((actual / planned) * 1000) / 10 : null;
+  const totals = { planned, actual: Math.round(actual * 100) / 100, used: usedAll, reported: reportedAll, variance: usedAll != null ? Math.round((usedAll - reportedAll) * 10) / 10 : null };
   return (
     <div>
-      {/* cost first: what the project has cost so far against its estimate amount, then who it came from */}
-      <CostVsEstimate p={p} cost={totalCost} />
-
+      {/* planned hours (Estimate), actual hours (timesheets), used %, reported % (Update tab) and the variance */}
       <div className="card card-flush" style={{ marginTop: 16 }}>
-        <CardHead title="Hours and cost by member" sub="Hours from timesheets of this project; rate per hour of each member." />
-        {mh.length ? (
-          <div className="table-wrap" style={{ marginTop: 12 }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Member</th>
-                  <th className="right">Hours</th>
-                  <th className="right">Rate / hr</th>
-                  <th className="right">Cost</th>
-                  <th>Share of cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mh.map((m) => {
-                  const share = pct(m.cost ?? 0, totalCost);
-                  return (
-                    <tr key={m.id}>
-                      <td>
-                        <MemberCell name={m.name} />
-                      </td>
-                      <td className="num right">{formatNumber(m.hours)}h</td>
-                      <td className="num right">{m.rate != null ? formatMoney(m.rate, cur) : <span className="muted">Not set</span>}</td>
-                      <td className="num right">
-                        <b>{m.cost != null ? formatMoney(m.cost, cur) : '—'}</b>
-                      </td>
-                      <td style={{ minWidth: 170 }}>
-                        <div className="row" style={{ gap: 8 }}>
-                          <div className="progress grow">
-                            <span style={{ width: `${share}%` }} />
-                          </div>
-                          <span className="small num">{share}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                <tr style={{ background: 'var(--surface-2)' }}>
-                  <td>
-                    <b>All users ({mh.length})</b>
-                  </td>
-                  <td className="num right">
-                    <b>{formatNumber(totalHours)}h</b>
-                  </td>
-                  <td className="num right muted">{avgRate != null ? `avg ${formatMoney(avgRate, cur)}` : '—'}</td>
-                  <td className="num right">
-                    <b>{formatMoney(totalCost, cur)}</b>
-                  </td>
-                  <td />
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <EmptyState icon={Clock3} title="No time logged yet">
-            Hours and cost appear here once members log time on this project.
-          </EmptyState>
-        )}
-      </div>
-
-      <div className="card card-flush" style={{ marginTop: 16 }}>
-        <CardHead title="Allocation vs actual" sub="Actual hours come from timesheets of this project.">
-          {canEdit && <EditLink id={p.id} tab="estimate">Edit allocation</EditLink>}
-        </CardHead>
-        <div style={{ padding: '16px 20px 4px' }}>
-          <EffortSplit estimates={p.estimates} legend={false} />
-        </div>
+        <CardHead title="Analysis" sub="Planned hours come from the estimate, actual hours from the timesheets, reported % from the Update tab." />
         <div className="table-wrap" style={{ marginTop: 12 }}>
           <table className="data-table">
             <thead>
               <tr>
                 <th>Task group</th>
-                <th className="right">Allocated</th>
-                <th className="right">Allocated hrs</th>
-                <th className="right">Actual hrs</th>
-                <th>Consumed</th>
-                <th className="right">Share of actual</th>
+                <th className="right">Planned</th>
+                <th className="right">Actual</th>
+                <th className="right">Used %</th>
+                <th className="right">Reported %</th>
+                <th className="right">Variance</th>
               </tr>
             </thead>
             <tbody>
-              {p.estimates.map((e, i) => {
-                const consumed = e.hours ? pct(e.actualHours, e.hours) : 0;
-                return (
-                  <tr key={e.taskGroupId}>
-                    <td>
-                      <span className="row" style={{ gap: 8 }}>
-                        <ColorDot i={i} />
-                        <b>{e.taskGroupName}</b>
-                      </span>
-                    </td>
-                    <td className="num right">{e.effortPercentage}%</td>
-                    <td className="num right">{e.hours != null ? formatNumber(e.hours) : '—'}</td>
-                    <td className="num right">{formatNumber(e.actualHours)}</td>
-                    <td style={{ minWidth: 160 }}>
-                      <div className="row" style={{ gap: 8 }}>
-                        <div className={`progress grow${consumed > 100 ? ' is-danger' : consumed >= 85 ? ' is-warning' : ''}`}>
-                          <span style={{ width: `${Math.min(100, consumed)}%` }} />
-                        </div>
-                        <span className="small num">{e.hours ? `${consumed}%` : '—'}</span>
-                      </div>
-                    </td>
-                    <td className="num right">{pct(e.actualHours, totalActual)}%</td>
-                  </tr>
-                );
-              })}
+              {rows.map((r, i) => (
+                <tr key={r.taskGroupId}>
+                  <td>
+                    <span className="row" style={{ gap: 8 }}>
+                      <ColorDot i={i} />
+                      <b>{r.name}</b>
+                    </span>
+                  </td>
+                  <td className="num right">{r.planned != null ? formatNumber(r.planned) : '—'}</td>
+                  <td className="num right">{formatNumber(r.actual)}</td>
+                  <td className="num right">{r.used != null ? formatNumber(r.used) : '—'}</td>
+                  <td className="num right">{formatNumber(r.reported)}</td>
+                  <td className="num right">
+                    <VarianceCell value={r.variance} />
+                  </td>
+                </tr>
+              ))}
+              <tr style={{ background: 'var(--surface-2)' }}>
+                <td>
+                  <b>TOTAL</b>
+                </td>
+                <td className="num right">
+                  <b>{totals.planned ? formatNumber(totals.planned) : '—'}</b>
+                </td>
+                <td className="num right">
+                  <b>{formatNumber(totals.actual)}</b>
+                </td>
+                <td className="num right">
+                  <b>{totals.used != null ? formatNumber(totals.used) : '—'}</b>
+                </td>
+                <td className="num right">
+                  <b>{formatNumber(totals.reported)}</b>
+                </td>
+                <td className="num right">
+                  <b>
+                    <VarianceCell value={totals.variance} />
+                  </b>
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
+        <p className="muted small" style={{ margin: '10px 20px 16px' }}>
+          Used % = actual ÷ planned hours. Variance = Used % − Reported %: above 0 means more of the hours are used than the progress reported, below 0 means the reported progress is ahead of the hours used.
+        </p>
       </div>
-
     </div>
   );
+}
+
+/** Variance: red above 0 (more hours used than progress reported), green below 0. */
+function VarianceCell({ value }) {
+  if (value == null) return <span className="muted">—</span>;
+  const color = value > 0 ? 'var(--danger)' : value < 0 ? 'var(--green-700)' : undefined;
+  return <span style={color ? { color } : undefined}>{formatNumber(value)}</span>;
 }
 
 /* ------------------------------------------------------------------ History */
@@ -521,13 +397,128 @@ export function AnalysisView({ p, canEdit }) {
 const ACTION_TEXT = { create: 'Project created', update: 'Project updated', status_change: 'Stage changed', delete: 'Project deleted' };
 const FIELD_LABEL = { members: 'members', estimate: 'estimate' };
 
-export function HistoryView({ id, canEdit }) {
-  const { data, isLoading } = useQuery({ queryKey: ['projects', Number(id), 'activity'], queryFn: () => projectsApi.activity(id) });
+/* ------------------------------------------------------------------ Tasks */
+
+/**
+ * Tasks tab: the project's tasks, the skills (task roles) each needs and the project members whose
+ * role has one of those skills (Roles & Permissions → Skills).
+ */
+export function TasksView({ id }) {
+  const { data, isLoading } = useQuery({ queryKey: ['projects', Number(id), 'tasks'], queryFn: () => projectsApi.tasks(id) });
+  const canOpen = usePermissions(SCREENS.TASKS).view; // task names open the task details
+  const tasks = data ?? [];
+  const done = tasks.filter((t) => t.status === 'completed').length;
+  const late = tasks.filter((t) => t.isOverdue).length;
   return (
     <div className="card card-flush" style={{ marginTop: 16 }}>
-      <CardHead title="History" sub="Everything that changed on this project.">
-        {canEdit && <EditLink id={id} tab="project">Edit project</EditLink>}
-      </CardHead>
+      <CardHead
+        title="Tasks"
+        sub={
+          tasks.length
+            ? `${tasks.length} task${tasks.length === 1 ? '' : 's'} · ${tasks.length - done} open · ${done} completed${late ? ` · ${late} overdue` : ''} · by priority`
+            : 'Tasks of this project (from the task template, Task → New task or Add from template).'
+        }
+      />
+      {isLoading ? (
+        <div style={{ padding: 20 }}>
+          <Spinner />
+        </div>
+      ) : tasks.length ? (
+        <div className="table-wrap" style={{ marginTop: 12 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Task</th>
+                <th>Owner → Assigned to</th>
+                <th>Priority</th>
+                <th>Timeline</th>
+                <th className="center">Subtasks</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((t) => (
+                <tr key={t.id}>
+                  <td style={{ minWidth: 240, maxWidth: 380 }}>
+                    {canOpen ? (
+                      // the task page's back button returns to this tab
+                      <Link className="cell-title" to={`/tasks/${t.id}`} state={{ from: `/projects/${id}#tasks` }} style={{ color: 'var(--ink)' }}>
+                        {t.name}
+                      </Link>
+                    ) : (
+                      <div className="cell-title" style={{ color: 'var(--ink)' }}>
+                        {t.name}
+                      </div>
+                    )}
+                    <div className="cell-sub">
+                      {[t.taskGroupName, t.taskTypeName].filter(Boolean).join(' · ') || '—'}
+                    </div>
+                  </td>
+                  <td className="nowrap">
+                    {t.ownerName || t.assignedToName ? <TaskPeople task={t} /> : <span className="muted small">Not assigned</span>}
+                  </td>
+                  <td>
+                    <PriorityBadge priority={t.priority} />
+                  </td>
+                  <td className="nowrap">
+                    {t.isContinuous || t.plannedEnd ? <TaskTimeline task={t} /> : <span className="muted small">No dates</span>}
+                  </td>
+                  <td className="center">
+                    <SubtaskCount task={t} />
+                  </td>
+                  <td>
+                    <StatusBadge status={t.status} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyState icon={ListChecks} title="No tasks yet">
+          Add tasks from Task → New task or Add from template.
+        </EmptyState>
+      )}
+    </div>
+  );
+}
+
+/** History tab: Comments (all comments and stage logs of the Update tab) and Logs (every change made to the project). */
+export function HistoryView({ id, view, onView }) {
+  const [own, setOwn] = useState('logs');
+  const current = view ?? own;
+  const select = onView ?? setOwn;
+  const reviews = useQuery({ queryKey: ['projects', Number(id), 'reviews'], queryFn: () => projectsApi.reviews(id), enabled: current === 'logs' });
+  const logs = (reviews.data ?? []).filter((r) => r.comment).sort((a, b) => b.id - a.id); // newest first
+  return (
+    <>
+      <div className="subtabs" role="tablist" style={{ marginTop: 16 }}>
+        {[
+          ['logs', 'Comments'],
+          ['history', 'Logs'],
+        ].map(([key, label]) => (
+          <button key={key} type="button" role="tab" aria-selected={current === key} className={current === key ? 'is-active' : undefined} onClick={() => select(key)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {current === 'logs' ? (
+        <div className="card card-flush" style={{ marginTop: 12 }}>
+          <CardHead title="Comments" sub="All comments and stage changes, latest first." />
+          <div style={{ padding: '16px 20px 20px' }}>{reviews.isLoading ? <Spinner /> : <CommentsLog reviews={logs} />}</div>
+        </div>
+      ) : (
+        <AuditHistory id={id} />
+      )}
+    </>
+  );
+}
+
+function AuditHistory({ id }) {
+  const { data, isLoading } = useQuery({ queryKey: ['projects', Number(id), 'activity'], queryFn: () => projectsApi.activity(id) });
+  return (
+    <div className="card card-flush" style={{ marginTop: 12 }}>
+      <CardHead title="Logs" sub="Everything that changed on this project." />
       <div style={{ padding: '16px 20px 20px' }}>
         {isLoading ? (
           <Spinner />

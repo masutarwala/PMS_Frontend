@@ -40,6 +40,7 @@ export function SideHills() {
 
 /** "Small plans, big results" card (hidden by theme.css on short screens and when collapsed). */
 function SidePromo() {
+  const { can } = useAuth();
   return (
     <div className="side-promo">
       <svg className="sp-art" viewBox="0 0 140 112" aria-hidden="true">
@@ -74,8 +75,8 @@ function SidePromo() {
         big results
       </b>
       <span>Plan. Track. Deliver.</span>
-      {/* TODO: point to the Daily Planner once that module is built */}
-      <Link className="btn sp-btn" to="/projects">
+      {/* today's 1-3-5 planner (Task → 1-3-5), else the projects */}
+      <Link className="btn sp-btn" to={can(SCREENS.TASK_135) ? SCREENS.TASK_135 : '/projects'}>
         Plan my day
         <ArrowRight />
       </Link>

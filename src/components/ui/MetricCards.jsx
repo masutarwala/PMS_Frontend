@@ -88,9 +88,10 @@ export function AreaCard({ title, icon, value, trend, subs, series }) {
   );
 }
 
-export function WatermarkCard({ title, icon: Icon, value, unit, subs }) {
+/** tone: info | warning | danger | success tints the card (default green). */
+export function WatermarkCard({ title, icon: Icon, value, unit, subs, tone }) {
   return (
-    <div className="metric-card mc-watermark">
+    <div className={`metric-card mc-watermark${tone ? ` mc-tone mc-tone-${tone}` : ""}`}>
       <span className="wm">{Icon && <Icon />}</span>
       <Head title={title} icon={Icon} />
       <div className="mc-value">
@@ -429,7 +430,11 @@ const readCollapsed = (key) => {
  * collapsed = one slim strip of title · value pills. Remembered per page.
  * Each child card needs `title` and `pill` (string/number shown in the strip; falls back to `value`).
  */
-export function KpiSection({ storageKey, columns = 4, children, style }) {
+/**
+ * `actions` (optional): the page's buttons – at the end of the pill row when the cards are hidden,
+ * in their own row under the cards when shown.
+ */
+export function KpiSection({ storageKey, columns = 4, children, style, actions }) {
   const key = `pms.kpi.${storageKey}`;
   const [collapsed, setCollapsed] = useState(() => readCollapsed(key));
   const cards = Children.toArray(children).filter(isValidElement);
@@ -464,11 +469,19 @@ export function KpiSection({ storageKey, columns = 4, children, style }) {
               <b>{c.props.pill ?? fmt(c.props.value)}</b>
             </span>
           ))}
+          {actions && <div className="kpi-actions">{actions}</div>}
         </div>
       ) : (
-        <div className={`grid grid-${columns}`} style={{ marginBottom: 20, ...style }}>
-          {children}
-        </div>
+        <>
+          <div className={`grid grid-${columns}`} style={{ marginBottom: 20, ...style }}>
+            {children}
+          </div>
+          {actions && (
+            <div className="page-head">
+              <div className="actions">{actions}</div>
+            </div>
+          )}
+        </>
       )}
     </>
   );

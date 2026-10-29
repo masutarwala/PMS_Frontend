@@ -5,8 +5,9 @@ import { ArrowLeft } from 'lucide-react';
 /**
  * Page header: optional back button, breadcrumb, title and actions on the right.
  *   <Topbar title="Project List" breadcrumb={['Projects']} back="/projects" actions={<…/>} />
+ * backState: router state passed along with the back link (e.g. where that page should go back to).
  */
-export function Topbar({ title, breadcrumb = [], back, actions }) {
+export function Topbar({ title, breadcrumb = [], back, backState, actions }) {
   useEffect(() => {
     document.title = `${title} · emQube PMS`;
   }, [title]);
@@ -15,7 +16,7 @@ export function Topbar({ title, breadcrumb = [], back, actions }) {
     <header className="topbar">
       <div className="topbar-title">
         {back && (
-          <Link className="btn btn-secondary btn-icon" to={back} title="Back">
+          <Link className="btn btn-secondary btn-icon" to={back} state={backState} title="Back">
             <ArrowLeft />
           </Link>
         )}

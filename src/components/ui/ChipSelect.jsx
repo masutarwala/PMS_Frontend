@@ -66,8 +66,8 @@ export function ChipSelect({ options = [], value = [], onChange, placeholder = '
         aria-disabled={disabled || undefined}
       >
         {(pill ? selected.slice(0, PILL_CHIPS) : selected).map((o) => (
-          <span key={o.value} className="chip">
-            {o.label}
+          <span key={o.value} className="chip" title={o.label}>
+            <span className="chip-label">{o.label}</span>
             <button
               type="button"
               title={`Remove ${o.label}`}

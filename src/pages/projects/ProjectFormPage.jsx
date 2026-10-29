@@ -9,6 +9,8 @@ import { Topbar } from '@/components/layout/Topbar';
 import { ErrorAlert } from '@/components/ui/Display';
 import { useToast } from '@/components/ui/toast-context';
 import { useApiFormError } from '@/hooks/useApiForm';
+import { useProjectAccess } from '@/auth/auth-context';
+import { PROJECT_FIELDS, REQUIRED_FIELDS } from '@/lib/projectAccess';
 import { ProjectFields } from './tabs/EditTabs';
 
 /*
@@ -34,6 +36,7 @@ const schema = z
     estimatedAmountCurrency: z.string(),
     sharepointLink: z.union([z.literal(''), z.url('Enter a valid URL (https://…)')]),
     isRetainerProject: z.boolean(),
+    isBillable: z.boolean(),
     detail: z.string().max(10000),
   })
   .refine((v) => !v.endDate || v.endDate >= v.startDate, { path: ['endDate'], message: 'End date cannot be before the start date' });
@@ -47,9 +50,10 @@ const EMPTY = {
   startDate: '',
   endDate: '',
   estimatedAmount: '',
-  estimatedAmountCurrency: 'INR',
+  estimatedAmountCurrency: 'AED',
   sharepointLink: '',
   isRetainerProject: false,
+  isBillable: true,
   detail: '',
 };
 
@@ -65,6 +69,7 @@ const fromProject = (p) => ({
   estimatedAmountCurrency: p.estimatedAmountCurrency ?? 'INR',
   sharepointLink: p.sharepointLink ?? '',
   isRetainerProject: p.isRetainerProject,
+  isBillable: p.isBillable ?? true,
   detail: p.detail ?? '',
 });
 
@@ -81,6 +86,7 @@ function toPayload(v) {
     estimatedAmountCurrency: v.estimatedAmountCurrency || null,
     sharepointLink: v.sharepointLink || null,
     isRetainerProject: v.isRetainerProject,
+    isBillable: v.isBillable,
     detail: v.detail || null,
   };
 }
@@ -88,6 +94,7 @@ function toPayload(v) {
 export default function ProjectFormPage() {
   const navigate = useNavigate();
   const toast = useToast();
+  const access = useProjectAccess();
   const queryClient = useQueryClient();
 
   // "Duplicate" from the list / details pre-fills the new project with a copy of another one.
@@ -98,6 +105,8 @@ export default function ProjectFormPage() {
     register,
     handleSubmit,
     setError,
+    getValues,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm({ resolver: zodResolver(schema), defaultValues: duplicateOf ? fromProject(duplicateOf) : EMPTY });
   const { formError, handleApiError } = useApiFormError(setError);
@@ -107,13 +116,20 @@ export default function ProjectFormPage() {
     mutationFn: (body) => projectsApi.create(body),
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'options'] }); // the new project for task / timesheet forms
+      queryClient.invalidateQueries({ queryKey: ['timesheets'] });
       toast.success(`Project ${saved.code} created${saved.taskCount ? ` with ${saved.taskCount} tasks` : ''}`);
       navigate(`/projects/${saved.id}`);
     },
     onError: (err) => handleApiError(err),
   });
 
-  const onSubmit = (values) => save.mutateAsync(toPayload(values)).catch(() => {});
+  // fields the role may not set on a new project are left out (the API uses their defaults)
+  const onSubmit = (values) => {
+    const body = toPayload(values);
+    for (const f of PROJECT_FIELDS) if (!f.required && access.field(f.key) !== 'edit') delete body[f.key];
+    return save.mutateAsync(body).catch(() => {});
+  };
 
   return (
     <>
@@ -128,7 +144,16 @@ export default function ProjectFormPage() {
                 <div className="form-section-sub">Create the project with its basic details. Users, estimate and reviews are added from Edit after it is saved.</div>
               </div>
             </div>
-            <ProjectFields control={control} register={register} errors={errors} startDate={startDate} />
+            <ProjectFields
+              control={control}
+              register={register}
+              errors={errors}
+              startDate={startDate}
+              getValues={getValues}
+              setValue={setValue}
+              // required fields are always filled in on a new project
+              access={(key) => (REQUIRED_FIELDS.includes(key) ? 'edit' : access.field(key))}
+            />
           </section>
           <div className="form-bar">
             <span className="note">

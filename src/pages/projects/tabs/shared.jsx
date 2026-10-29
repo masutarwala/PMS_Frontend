@@ -1,6 +1,7 @@
-import { Calculator, ChartColumn, Eye, FileSearch, FileText, FolderKanban, History, RefreshCw, SquarePen, Users } from 'lucide-react';
+import { Calculator, CalendarRange, ChartColumn, FileText, Flag, FolderKanban, History, RefreshCw, Users, Wallet } from 'lucide-react';
+import { useAuth, useProjectAccess } from '@/auth/auth-context';
 import { Avatar, StageBadge } from '@/components/ui/Display';
-import { formatDateTime, formatNumber } from '@/lib/format';
+import { formatDate, formatDateTime, formatNumber } from '@/lib/format';
 
 /*
  * Pieces shared by the project details page (read-only tabs) and the edit page (editable tabs),
@@ -12,6 +13,8 @@ export const TABS = [
   { key: 'project', label: 'Project', icon: FileText },
   { key: 'users', label: 'Users', icon: Users },
   { key: 'estimate', label: 'Estimate', icon: Calculator },
+  { key: 'plan', label: 'Plan', icon: CalendarRange, ownerOnly: true }, // weekly plan by task group – the project owner only
+  { key: 'commercial', label: 'Commercial', icon: Wallet, commercial: true }, // only when the API allows it (role's project access)
   { key: 'analysis', label: 'Analysis', icon: ChartColumn },
   { key: 'history', label: 'History', icon: History },
 ];
@@ -22,21 +25,28 @@ export const tabFromHash = (fallback) => {
   return TABS.some((t) => t.key === h) ? h : fallback;
 };
 
-export const ACCESS = {
-  view: { label: 'View only', icon: Eye, desc: 'Quick view (eye) in the project list only' },
-  advanced_view: { label: 'Advanced view', icon: FileSearch, desc: 'Can open the project details page' },
-  edit: { label: 'Can edit', icon: SquarePen, desc: 'Can edit the project' },
-};
 
 /** a as a % of b, with up to 2 decimals (not rounded to a whole number). */
 export const pct = (a, b) => (b ? Math.round((a / b) * 10000) / 100 : 0);
 const dueLabel = (d) => (d ? new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short' }).format(new Date(`${d}T00:00:00`)) : '—');
 const shortDate = (d) => new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short' }).format(new Date(`${d}T00:00:00`));
 
-export function TabBar({ tab, onSelect }) {
+/** Tabs the user may see: none hidden for their role, Commercial only when the API allows it (p.canSeeCommercial), Plan only for the owner (and not hidden for the role). */
+export const visibleTabs = (p, tabAccess = () => 'edit', userId = null) =>
+  TABS.filter((t) => (!t.ownerOnly || p?.ownerId === userId) && tabAccess(t.key) !== 'hidden' && (!t.commercial || p?.canSeeCommercial));
+
+/** The tab to show: the asked one, or the first one the user may see. */
+export const usableTab = (tab, p, tabAccess, userId) => {
+  const tabs = visibleTabs(p, tabAccess, userId);
+  return tabs.some((t) => t.key === tab) ? tab : (tabs[0]?.key ?? tab);
+};
+
+export function TabBar({ tab, onSelect, p }) {
+  const access = useProjectAccess();
+  const { user } = useAuth();
   return (
     <div className="tabs" role="tablist" style={{ marginTop: 20 }}>
-      {TABS.map((t) => (
+      {visibleTabs(p, access.tab, user.id).map((t) => (
         <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} className={`tab${tab === t.key ? ' is-active' : ''}`} onClick={() => onSelect(t.key)}>
           <span className="tab-ico">
             <t.icon />
@@ -137,34 +147,6 @@ export function EffortSplit({ estimates, legend = true }) {
   );
 }
 
-export function AccessTiles() {
-  return (
-    <div className="access-summary">
-      {Object.entries(ACCESS).map(([level, a]) => (
-        <div key={level} className="acc-tile" data-level={level}>
-          <span className="acc-ico">
-            <a.icon />
-          </span>
-          <div>
-            <b>{a.label}</b>
-            <span>{a.desc}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export function AccessBadge({ level }) {
-  const a = ACCESS[level] ?? ACCESS.view;
-  return (
-    <span className="access-badge" data-level={level}>
-      <a.icon />
-      {a.label}
-    </span>
-  );
-}
-
 export function GradeTag({ grade, team }) {
   if (!grade) return <span className="muted small">—</span>;
   return (
@@ -253,7 +235,7 @@ export function ReviewGrid({ reviews, estimates, entry }) {
   );
 }
 
-/** Comments as a simple log: who wrote it, when, and the comment, latest first. */
+/** Comments and system logs (stage changes): who, when and the text, latest first. */
 export function CommentsLog({ reviews }) {
   if (!reviews.length) return <p className="muted small">No comments yet.</p>;
   return (
@@ -261,14 +243,21 @@ export function CommentsLog({ reviews }) {
       {reviews.map((r) => {
         const who = r.reviewerName ?? 'System';
         return (
-          <li key={r.id} className="cmt-item">
-            <Avatar name={who} />
+          <li key={r.id} className={`cmt-item${r.isSystem ? ' is-system' : ''}`}>
+            {r.isSystem ? (
+              <span className="cmt-sys-ico" title="Logged by the system">
+                <Flag />
+              </span>
+            ) : (
+              <Avatar name={who} />
+            )}
             <div className="cmt-body">
               <div className="cmt-who">
-                <span>{who}</span>
+                <span>{r.isSystem ? `System · by ${who}` : who}</span>
                 <time dateTime={r.createdAt}>{formatDateTime(r.createdAt)}</time>
               </div>
               <p className="cmt-text">{r.comment}</p>
+              {r.isSystem && r.reviewDate && <span className="cmt-meta">Stage date {formatDate(r.reviewDate)}</span>}
             </div>
           </li>
         );

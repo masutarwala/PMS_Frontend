@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { LayoutGrid, List, Table2, X } from 'lucide-react';
 import { Checkbox } from './Field';
+import { Dropdown } from './Dropdown';
 
 /*
  * Pieces every list screen uses, in the order the design rules prescribe:
@@ -162,3 +163,12 @@ export function Drawer({ open, onClose, title, children, footer, className = '',
 
 /** Card colour tones cycle like the mock-ups. */
 export const CARD_TONES = ['rc-deep', '', 'rc-lime', 'rc-mint', 'rc-sage'];
+
+/**
+ * A single-choice list filter (clearable) whose value stays a one-item list, as the list pages and the API
+ * work with lists. Multi-select is kept for the filters where several values are really needed (status, priority, stage).
+ */
+export function SingleFilter({ value, onChange, ...props }) {
+  const one = Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
+  return <Dropdown pill clearable {...props} value={one} onChange={(v) => onChange(v === null || v === undefined ? [] : [v])} />;
+}

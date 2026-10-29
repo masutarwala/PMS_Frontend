@@ -1,5 +1,12 @@
-// Quick date ranges for the "Date" filter pill. Returns { from, to } as 'YYYY-MM-DD'.
+import { todayIso } from './timezone';
+
+// Quick date ranges for the "Date" filter pill. Returns { from, to } as 'YYYY-MM-DD',
+// counted from today in the user's time zone.
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const userToday = () => {
+  const [y, m, d] = todayIso().split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
 
 export const DATE_RANGES = [
   { value: 'today', label: 'Today' },
@@ -10,7 +17,7 @@ export const DATE_RANGES = [
   { value: 'custom', label: 'Custom range…' },
 ];
 
-export function rangeFor(key, now = new Date()) {
+export function rangeFor(key, now = userToday()) {
   const y = now.getFullYear();
   const m = now.getMonth();
   switch (key) {

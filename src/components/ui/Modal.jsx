@@ -1,5 +1,16 @@
 import { useEffect } from 'react';
-import { Trash2, X } from 'lucide-react';
+import { Check, Trash2, X } from 'lucide-react';
+
+// open popups – the page behind does not scroll while any is open
+let openCount = 0;
+function lockPage() {
+  openCount += 1;
+  if (openCount === 1) document.documentElement.classList.add('has-modal');
+  return () => {
+    openCount -= 1;
+    if (openCount === 0) document.documentElement.classList.remove('has-modal');
+  };
+}
 
 export function Modal({ open, onClose, title, children, footer, size }) {
   useEffect(() => {
@@ -8,6 +19,7 @@ export function Modal({ open, onClose, title, children, footer, size }) {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
+  useEffect(() => (open ? lockPage() : undefined), [open]);
 
   return (
     <div
@@ -30,8 +42,8 @@ export function Modal({ open, onClose, title, children, footer, size }) {
   );
 }
 
-/** Destructive actions always go through this confirmation (design rule 10). */
-export function ConfirmDeleteModal({ open, onClose, onConfirm, title, message, busy, confirmLabel = 'Delete' }) {
+/** Destructive actions always go through this confirmation (design rule 10). tone="primary" for non-destructive confirmations. */
+export function ConfirmDeleteModal({ open, onClose, onConfirm, title, message, busy, confirmLabel = 'Delete', tone = 'danger' }) {
   return (
     <Modal
       open={open}
@@ -42,9 +54,9 @@ export function ConfirmDeleteModal({ open, onClose, onConfirm, title, message, b
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={busy}>
-            <Trash2 />
-            {busy ? 'Deleting…' : confirmLabel}
+          <button type="button" className={`btn btn-${tone}`} onClick={onConfirm} disabled={busy}>
+            {tone === 'danger' ? <Trash2 /> : <Check />}
+            {busy ? (tone === 'danger' ? 'Deleting…' : 'Saving…') : confirmLabel}
           </button>
         </>
       }

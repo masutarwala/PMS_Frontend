@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { emailSchema } from '@/lib/validation';
@@ -17,15 +17,14 @@ import { ErrorAlert } from '@/components/ui/Display';
 import { FullPageLoader } from '@/components/ui/Loader';
 import { useToast } from '@/components/ui/toast-context';
 import { useApiFormError } from '@/hooks/useApiForm';
-import { useAssignableRoleOptions, useCurrencyOptions, useLookupOptions, useMasterOptions } from '@/hooks/useOptions';
+import { useAssignableRoleOptions, useLookupOptions, useMasterOptions } from '@/hooks/useOptions';
 import { TIME_ZONES } from '@/lib/constants';
+import { todayIso } from '@/lib/timezone';
 import { passwordSchema } from '@/lib/password';
 import NotFoundPage from '@/pages/errors/NotFoundPage';
 
-const optionalNumber = z
-  .string()
-  .trim()
-  .refine((v) => v === '' || (!Number.isNaN(Number(v)) && Number(v) >= 0), 'Enter a positive number');
+/** Roles whose users have skills (Parameters → SKILL). */
+const SKILL_ROLES = ['EMPLOYEE', 'PROJECT_MANAGER'];
 
 const makeSchema = (isEdit) =>
   z
@@ -47,12 +46,11 @@ const makeSchema = (isEdit) =>
       confirmPassword: z.string(),
       reportsTo: z.number().nullable(),
       resourceGradeId: z.number().nullable(),
+      skillIds: z.array(z.number()),
       siteId: z.number().nullable(),
-      shiftId: z.number().nullable(),
+      siteShiftId: z.number().nullable(),
       timeZone: z.string().min(1),
       isOnLeave: z.boolean(),
-      hourlyRate: optionalNumber,
-      hourlyRateCurrency: z.string().nullable(),
     })
     .refine((v) => v.password === v.confirmPassword, { path: ['confirmPassword'], message: 'Passwords do not match' });
 
@@ -69,12 +67,11 @@ const EMPTY = {
   confirmPassword: '',
   reportsTo: null,
   resourceGradeId: null,
+  skillIds: [],
   siteId: null,
-  shiftId: null,
+  siteShiftId: null,
   timeZone: 'Asia/Kolkata',
   isOnLeave: false,
-  hourlyRate: '',
-  hourlyRateCurrency: null,
 };
 
 const fromUser = (u) => ({
@@ -89,12 +86,11 @@ const fromUser = (u) => ({
   isActive: u.isActive,
   reportsTo: u.reportsTo,
   resourceGradeId: u.resourceGradeId,
+  skillIds: (u.skills ?? []).map((x) => x.id),
   siteId: u.siteId,
-  shiftId: u.shiftId,
+  siteShiftId: u.siteShiftId ?? null,
   timeZone: u.timeZone,
   isOnLeave: u.isOnLeave,
-  hourlyRate: u.hourlyRate != null ? String(u.hourlyRate) : '',
-  hourlyRateCurrency: u.hourlyRateCurrency,
 });
 
 function toPayload(v) {
@@ -109,12 +105,11 @@ function toPayload(v) {
     isActive: v.isActive,
     reportsTo: v.reportsTo,
     resourceGradeId: v.resourceGradeId,
+    skillIds: v.skillIds, // the API keeps them only for Employee / Project Manager
     siteId: v.siteId,
-    shiftId: v.shiftId,
+    siteShiftId: v.siteId ? v.siteShiftId : null,
     timeZone: v.timeZone,
     isOnLeave: v.isOnLeave,
-    hourlyRate: v.hourlyRate === '' ? null : Number(v.hourlyRate),
-    hourlyRateCurrency: v.hourlyRateCurrency,
   };
   if (v.password) body.password = v.password;
   return body;
@@ -147,11 +142,11 @@ export default function UserFormPage() {
   const roles = useAssignableRoleOptions();
   const userTypes = useLookupOptions('USER_TYPE');
   const people = useMasterOptions('users');
+  const skillOptions = useLookupOptions('SKILL').options;
   const sites = useMasterOptions('sites');
-  const shifts = useMasterOptions('shifts');
+  const shiftsQ = useQuery({ queryKey: ['masters', 'site-shifts', 'all'], queryFn: () => mastersApi.list('site-shifts', { includeInactive: true }) });
   const gradesQ = useQuery({ queryKey: ['masters', 'resource-grades'], queryFn: () => mastersApi.list('resource-grades') });
   const grades = gradesQ.data ?? [];
-  const currencies = useCurrencyOptions();
 
   const userQ = useQuery({ queryKey: ['users', id], queryFn: () => usersApi.get(id), enabled: isEdit, retry: false });
   const schema = useMemo(() => makeSchema(isEdit), [isEdit]);
@@ -165,6 +160,17 @@ export default function UserFormPage() {
     formState: { errors, isSubmitting },
   } = useForm({ resolver: zodResolver(schema), defaultValues: EMPTY });
   const { formError, handleApiError } = useApiFormError(setError);
+  // skills only for users with the Employee or Project Manager role
+  const roleIdValue = useWatch({ control, name: 'roleId' });
+  const roleCode = roles.roles.find((r) => r.id === roleIdValue)?.code ?? (userQ.data?.roleId === roleIdValue ? userQ.data?.roleCode : undefined);
+  const showSkills = SKILL_ROLES.includes(roleCode);
+  const siteId = useWatch({ control, name: 'siteId' });
+  const siteShiftId = useWatch({ control, name: 'siteShiftId' });
+  // shifts of the selected site (active ones, plus the user's current one even if switched off)
+  const shiftOptions = useMemo(
+    () => (shiftsQ.data ?? []).filter((s) => s.siteId === siteId && (s.isActive !== false || s.id === siteShiftId)).map((s) => ({ value: s.id, label: s.name })),
+    [shiftsQ.data, siteId, siteShiftId],
+  );
 
   useEffect(() => {
     if (userQ.data) reset(fromUser(userQ.data));
@@ -226,7 +232,7 @@ export default function UserFormPage() {
                 <Controller
                   name="dob"
                   control={control}
-                  render={({ field }) => <DatePicker value={field.value} onChange={field.onChange} onBlur={field.onBlur} max={new Date().toISOString().slice(0, 10)} placeholder="Select date of birth" />}
+                  render={({ field }) => <DatePicker value={field.value} onChange={field.onChange} onBlur={field.onBlur} max={todayIso()} placeholder="Select date of birth" />}
                 />
               </Field>
             </div>
@@ -266,16 +272,35 @@ export default function UserFormPage() {
             </div>
           </Section>
 
-          <Section num={3} title="Work" sub="Reporting line, location and shift.">
+          <Section num={3} title="Work" sub="Reporting line, site and the shift the user works.">
             <div className="form-grid">
               <Field label="Reports to" error={err('reportsTo')}>
                 {dd('reportsTo', { search: true, clearable: true, placeholder: 'Select reports to', options: peopleOptions })}
               </Field>
               <Field label="Site" error={err('siteId')}>
-                {dd('siteId', { search: true, clearable: true, placeholder: 'Select site', options: sites.options })}
+                <Controller
+                  name="siteId"
+                  control={control}
+                  render={({ field }) => (
+                    <Dropdown
+                      search
+                      clearable
+                      placeholder="Select site"
+                      options={sites.options}
+                      value={field.value}
+                      onBlur={field.onBlur}
+                      onChange={(v) => {
+                        field.onChange(v);
+                        // a new site: pick its shift (the only one, or let the user choose)
+                        const own = (shiftsQ.data ?? []).filter((s) => s.siteId === v && s.isActive !== false);
+                        setValue('siteShiftId', own.length === 1 ? own[0].id : null, { shouldDirty: true });
+                      }}
+                    />
+                  )}
+                />
               </Field>
-              <Field label="Shift" error={err('shiftId')}>
-                {dd('shiftId', { search: true, clearable: true, placeholder: 'Select shift', options: shifts.options })}
+              <Field label="Shift" error={err('siteShiftId')} help={siteId ? 'working hours for attendance' : 'select the site first'}>
+                {dd('siteShiftId', { clearable: true, disabled: !siteId, placeholder: siteId ? 'Select shift' : 'Select the site first', options: shiftOptions })}
               </Field>
               <Field label="Time zone" error={err('timeZone')}>
                 {dd('timeZone', { placeholder: 'Select time zone', options: TIME_ZONES.map((t) => ({ value: t, label: t })) })}
@@ -290,7 +315,11 @@ export default function UserFormPage() {
             </div>
           </Section>
 
-          <Section num={4} title="Grade & cost" sub="The grade's current cost pre-fills the hourly rate; change it for this user if needed. Used for project cost reports.">
+          <Section
+            num={4}
+            title={showSkills ? 'Grade & skills' : 'Grade'}
+            sub={`The user's cost comes from their grade (Administration → Resource Grade & Cost).${showSkills ? ' Skills show which project tasks they can do.' : ''}`}
+          >
             <div className="form-grid">
               <Field label="Grade" error={err('resourceGradeId')} help={grades.length ? undefined : 'Set up grades in Administration → Resource Grade & Cost'}>
                 <Controller
@@ -301,27 +330,19 @@ export default function UserFormPage() {
                       search
                       clearable
                       placeholder="Select grade"
-                      options={grades.map((g) => ({ value: g.id, label: g.costPerHour != null ? `${g.name} (${g.currency} ${g.costPerHour}/h)` : g.name }))}
+                      options={grades.map((g) => ({ value: g.id, label: g.name }))}
                       value={field.value}
-                      onChange={(v) => {
-                        field.onChange(v);
-                        // pre-fill the rate from the grade's current cost
-                        const g = grades.find((x) => x.id === v);
-                        if (g?.costPerHour != null) {
-                          setValue('hourlyRate', String(g.costPerHour), { shouldDirty: true });
-                          setValue('hourlyRateCurrency', g.currency, { shouldDirty: true });
-                        }
-                      }}
+                      onChange={field.onChange}
+                      onBlur={field.onBlur}
                     />
                   )}
                 />
               </Field>
-              <Field label="Hourly rate" error={err('hourlyRate')}>
-                <input className="input" type="number" min="0" step="0.01" placeholder="0.00" {...register('hourlyRate')} />
-              </Field>
-              <Field label="Rate currency" help="ISO code">
-                {dd('hourlyRateCurrency', { clearable: true, placeholder: 'Select rate currency', options: currencies })}
-              </Field>
+              {showSkills && (
+                <Field label="Skills" span={2} help={skillOptions.length ? 'what this person can do (Parameters → SKILL)' : 'Add skills in Parameters → SKILL'}>
+                  {dd('skillIds', { multi: true, search: true, placeholder: 'Select skills', options: skillOptions })}
+                </Field>
+              )}
             </div>
           </Section>
 

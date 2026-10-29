@@ -84,12 +84,12 @@ export function Checkbox({ label, checked, onChange, disabled, indeterminate, ti
   );
 }
 
-/** Choice chips for 2–4 fixed values. */
+/** Choice chips for 2–4 fixed values. An option with `tone` (low | medium | high | urgent) gets its own colour. */
 export function ChoiceGroup({ name, options, value, onChange }) {
   return (
     <div className="choice-group">
       {options.map((o) => (
-        <label key={o.value} className="choice">
+        <label key={o.value} className={`choice${o.tone ? ` choice-tone tone-${o.tone}` : ""}`}>
           <input type="radio" name={name} checked={value === o.value} onChange={() => onChange(o.value)} />
           <span>{o.label}</span>
         </label>

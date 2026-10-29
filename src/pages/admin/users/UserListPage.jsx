@@ -1,31 +1,33 @@
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router';
+import { useCallback, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowUpRight, Building2, ChevronRight, Download, EllipsisVertical, IdCard, LockOpen, MapPin, Pencil, Plane, Plus,
+  ArrowUpRight, Building2, ChevronRight, Download, IdCard, LockOpen, MapPin, Pencil, Plane, Plus,
   Search, Shield, SlidersHorizontal, Trash2, UserCheck, UserRound, Users,
 } from 'lucide-react';
 import { usersApi } from '@/api/endpoints';
 import { errorMessage } from '@/api/client';
 import { useAuth, usePermissions } from '@/auth/auth-context';
 import { Topbar } from '@/components/layout/Topbar';
-import { ActionMenu, Dropdown } from '@/components/ui/Dropdown';
+import { Dropdown } from '@/components/ui/Dropdown';
 import { ActiveBadge, Avatar, Badge, EmptyState, ErrorAlert, UserCell } from '@/components/ui/Display';
 import { Field, Switch } from '@/components/ui/Field';
 import {
-  ActiveFilters, BulkBar, CARD_TONES, Drawer, SelectAllCell, SelectRowCell, ViewSwitch, useSelection, useViewMode,
-} from '@/components/ui/ListKit';
+  ActiveFilters, CARD_TONES, Drawer, ViewSwitch, useSelection, useViewMode, SingleFilter } from '@/components/ui/ListKit';
 import { AreaCard, DonutCard, KpiSection, RowsCard, StackCard } from '@/components/ui/MetricCards';
 import { ConfirmDeleteModal } from '@/components/ui/Modal';
 import { TableFoot } from '@/components/ui/Pager';
+import { ColumnPicker, RowMenu, useColumns } from '@/components/ui/ColumnPicker';
 import { TableLoading } from '@/components/ui/Loader';
 import { useToast } from '@/components/ui/toast-context';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useSessionState } from '@/hooks/useSessionState';
 import { useAssignableRoleOptions, useLookupOptions, useMasterOptions } from '@/hooks/useOptions';
 import { SCREENS } from '@/lib/constants';
 import { downloadCsv } from '@/lib/csv';
+import { formatDateTime } from '@/lib/format';
 
-const EMPTY_FILTERS = { roleId: [], siteId: [], shiftId: [], active: null, reportsTo: [], userTypeId: [], onLeave: false };
+const EMPTY_FILTERS = { roleId: [], siteId: [], active: null, reportsTo: [], userTypeId: [], onLeave: false };
 
 function UserSummary({ s }) {
   const activePct = s?.total ? (s.active / s.total) * 100 : 0;
@@ -97,21 +99,21 @@ function MoreFilters({ open, onClose, filters, onApply, people, userTypes }) {
 export default function UserListPage() {
   const perms = usePermissions(SCREENS.USERS);
   const { user: me } = useAuth();
+  const navigate = useNavigate();
   const toast = useToast();
   const queryClient = useQueryClient();
 
   const [view, setView] = useViewMode('users');
-  const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [search, setSearch] = useSessionState('users.search', '');
+  const [filters, setFilters] = useSessionState('users.filters', EMPTY_FILTERS);
+  const [page, setPage] = useSessionState('users.page', 1);
+  const [pageSize, setPageSize] = useSessionState('users.pageSize', 10);
   const [toDelete, setToDelete] = useState(null); // user or 'bulk'
   const [moreOpen, setMoreOpen] = useState(false);
   const debouncedSearch = useDebounce(search);
 
   const roles = useAssignableRoleOptions();
   const sites = useMasterOptions('sites');
-  const shifts = useMasterOptions('shifts');
   const people = useMasterOptions('users');
   const userTypes = useLookupOptions('USER_TYPE');
 
@@ -119,7 +121,6 @@ export default function UserListPage() {
     search: debouncedSearch,
     roleId: filters.roleId,
     siteId: filters.siteId,
-    shiftId: filters.shiftId,
     reportsTo: filters.reportsTo,
     userTypeId: filters.userTypeId,
     isActive: filters.active === null ? undefined : filters.active === 'active',
@@ -160,10 +161,13 @@ export default function UserListPage() {
     onError: (err) => toast.error(errorMessage(err)),
   });
 
-  const setFilter = (key, value) => {
-    setFilters((f) => ({ ...f, [key]: value }));
-    setPage(1);
-  };
+  const setFilter = useCallback(
+    (key, value) => {
+      setFilters((f) => ({ ...f, [key]: value }));
+      setPage(1);
+    },
+    [setFilters, setPage],
+  );
 
   const chips = useMemo(() => {
     const out = [];
@@ -172,7 +176,7 @@ export default function UserListPage() {
       return n.length > 2 ? `${n.length} selected` : n.join(', ');
     };
     for (const [key, label, opts] of [
-      // role / site / shift show as chips in the filter bar; these two live in the More filters drawer
+      // role / site show as chips in the filter bar; these two live in the More filters drawer
       ['reportsTo', 'Reports to', people.options],
       ['userTypeId', 'User type', userTypes.options],
     ]) {
@@ -181,19 +185,92 @@ export default function UserListPage() {
     if (filters.active) out.push({ key: 'active', label: 'Active', value: filters.active === 'active' ? 'Active' : 'Inactive', onRemove: () => setFilter('active', null) });
     if (filters.onLeave) out.push({ key: 'leave', label: 'On leave', value: 'Yes', onRemove: () => setFilter('onLeave', false) });
     return out;
-  }, [filters, people.options, userTypes.options]);
+  }, [filters, people.options, userTypes.options, setFilter]);
 
   const exportRows = (rows) =>
     downloadCsv(
       'users.csv',
       ['Employee code', 'Name', 'Username', 'Email', 'Role', 'Reports to', 'Site', 'Shift', 'Active'],
-      rows.map((u) => [u.empCode, u.name, u.username, u.email, u.roleName, u.reportsToName, u.siteName, u.shiftName, u.isActive ? 'Yes' : 'No']),
+      rows.map((u) => [u.empCode, u.name, u.username, u.email, u.roleName, u.reportsToName, u.siteName, u.siteShift, u.isActive ? 'Yes' : 'No']),
     );
 
   const deleteIds = toDelete === 'bulk' ? selection.ids.filter((id) => id !== me.id) : toDelete ? [toDelete.id] : [];
   const hasFilters = JSON.stringify(filters) !== JSON.stringify(EMPTY_FILTERS);
   const isFiltered = debouncedSearch || hasFilters;
 
+
+  const rowMenu = (u) => (
+    <RowMenu
+      items={[
+        { label: 'Edit', icon: Pencil, hidden: !perms.edit, onClick: () => navigate(`/administration/users/${u.id}/edit`) },
+        { label: 'Unlock account', icon: LockOpen, hidden: !perms.edit || !u.isLocked, onClick: () => unlock.mutate(u.id) },
+        { divider: true, hidden: !perms.delete || u.id === me.id },
+        { label: 'Delete', icon: Trash2, danger: true, hidden: !perms.delete || u.id === me.id, onClick: () => setToDelete(u) },
+      ]}
+    />
+  );
+
+  // table columns – shown / hidden and ordered by the user (Columns button)
+  const cols = useColumns('users', [
+    {
+      key: 'user',
+      label: 'User',
+      locked: true,
+      td: (u) => (
+        <td key="user">
+          <UserCell name={u.name} sub={u.email || u.username} to={perms.edit ? `/administration/users/${u.id}/edit` : undefined} LinkComponent={Link} />
+        </td>
+      ),
+    },
+    { key: 'empCode', label: 'Employee code', td: (u) => <td key="empCode" className="nowrap">{u.empCode ?? '—'}</td> },
+    { key: 'role', label: 'Role', td: (u) => <td key="role" className="nowrap">{u.roleName}</td> },
+    {
+      key: 'reportsTo',
+      label: 'Reports to',
+      td: (u) => (
+        <td key="reportsTo">
+          <UserCell name={u.reportsToName} />
+        </td>
+      ),
+    },
+    { key: 'site', label: 'Site', td: (u) => <td key="site" className="nowrap">{u.siteName ?? '—'}</td> },
+    { key: 'shift', label: 'Shift', td: (u) => <td key="shift" className="nowrap">{u.siteShift ?? '—'}</td> },
+    {
+      key: 'skills',
+      label: 'Skills',
+      td: (u) => (
+        <td key="skills">
+          {u.skills?.length ? (
+            <div className="tpl-role-chips" style={{ maxWidth: 320 }} title={u.skills.map((x) => x.name).join(', ')}>
+              {u.skills.slice(0, 2).map((x) => (
+                <span key={x.id} className="chip">
+                  {x.name}
+                </span>
+              ))}
+              {u.skills.length > 2 && <span className="chip chip-more">+{u.skills.length - 2}</span>}
+            </div>
+          ) : (
+            <span className="muted">—</span>
+          )}
+        </td>
+      ),
+    },
+    { key: 'email', label: 'Email', defaultHidden: true, td: (u) => <td key="email" className="nowrap">{u.email ?? '—'}</td> },
+    { key: 'userType', label: 'User type', defaultHidden: true, td: (u) => <td key="userType" className="nowrap">{u.userTypeName ?? '—'}</td> },
+    { key: 'lastLogin', label: 'Last login', defaultHidden: true, td: (u) => <td key="lastLogin" className="nowrap">{u.lastLoginAt ? formatDateTime(u.lastLoginAt) : '—'}</td> },
+    {
+      key: 'active',
+      label: 'Active',
+      td: (u) => (
+        <td key="active">
+          <div className="row" style={{ gap: 6 }}>
+            <ActiveBadge active={u.isActive} />
+            {u.isLocked && <Badge tone="danger">Locked</Badge>}
+          </div>
+        </td>
+      ),
+    },
+  ]);
   return (
     <>
       <Topbar
@@ -233,9 +310,8 @@ export default function UserListPage() {
               }}
             />
           </div>
-          <Dropdown pill multi search placeholder="Role" options={roles.options} value={filters.roleId} onChange={(v) => setFilter('roleId', v)} />
-          <Dropdown pill multi search placeholder="Site" options={sites.options} value={filters.siteId} onChange={(v) => setFilter('siteId', v)} />
-          <Dropdown pill multi search placeholder="Shift" options={shifts.options} value={filters.shiftId} onChange={(v) => setFilter('shiftId', v)} />
+          <SingleFilter search placeholder="Role" options={roles.options} value={filters.roleId} onChange={(v) => setFilter('roleId', v)} />
+          <SingleFilter search placeholder="Site" options={sites.options} value={filters.siteId} onChange={(v) => setFilter('siteId', v)} />
           <Dropdown
             pill
             clearable
@@ -249,6 +325,7 @@ export default function UserListPage() {
             More filters
           </button>
           <span className="spacer" />
+          {view === 'table' && <ColumnPicker cols={cols} />}
           <ViewSwitch value={view} onChange={setView} />
         </div>
 
@@ -261,19 +338,6 @@ export default function UserListPage() {
           }}
         />
 
-        <BulkBar count={selection.count}>
-          {perms.export && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportRows(items.filter((u) => selection.isSelected(u.id)))}>
-              Export selected
-            </button>
-          )}
-          {perms.delete && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setToDelete('bulk')}>
-              <Trash2 />
-              Delete
-            </button>
-          )}
-        </BulkBar>
 
         {list.isError && (
           <div style={{ padding: '12px 20px 0' }}>
@@ -286,58 +350,18 @@ export default function UserListPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <SelectAllCell selection={selection} />
-                  <th>User</th>
-                  <th>Employee code</th>
-                  <th>Role</th>
-                  <th>Reports to</th>
-                  <th>Site</th>
-                  <th>Shift</th>
-                  <th>Active</th>
-                  <th className="col-actions" />
+                  <th className="col-menu" />
+                  {cols.columns.map((c) => (
+                    <th key={c.key}>{c.label}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {list.isLoading && <TableLoading colSpan={9} />}
+                {list.isLoading && <TableLoading colSpan={cols.columns.length + 1} />}
                 {items.map((u) => (
-                  <tr key={u.id} className={selection.isSelected(u.id) ? 'is-selected' : ''}>
-                    <SelectRowCell selection={selection} id={u.id} />
-                    <td>
-                      <UserCell name={u.name} sub={u.email || u.username} to={perms.edit ? `/administration/users/${u.id}/edit` : undefined} LinkComponent={Link} />
-                    </td>
-                    <td className="nowrap">{u.empCode ?? '—'}</td>
-                    <td className="nowrap">{u.roleName}</td>
-                    <td>
-                      <UserCell name={u.reportsToName} />
-                    </td>
-                    <td className="nowrap">{u.siteName ?? '—'}</td>
-                    <td className="nowrap">{u.shiftName ?? '—'}</td>
-                    <td>
-                      <div className="row" style={{ gap: 6 }}>
-                        <ActiveBadge active={u.isActive} />
-                        {u.isLocked && <Badge tone="danger">Locked</Badge>}
-                      </div>
-                    </td>
-                    <td className="col-actions">
-                      <div className="row-actions">
-                        {perms.edit && (
-                          <Link className="btn btn-ghost btn-icon" to={`/administration/users/${u.id}/edit`} title="Edit">
-                            <Pencil />
-                          </Link>
-                        )}
-                        <ActionMenu
-                          trigger={({ toggle, title }) => (
-                            <button type="button" className="dropdown-toggle btn btn-ghost btn-icon" style={{ width: 32, height: 32, border: 0, padding: 0, justifyContent: 'center' }} title={title} onClick={toggle}>
-                              <EllipsisVertical />
-                            </button>
-                          )}
-                          items={[
-                            { label: 'Unlock account', icon: LockOpen, hidden: !perms.edit || !u.isLocked, onClick: () => unlock.mutate(u.id) },
-                            { label: 'Delete', icon: Trash2, danger: true, hidden: !perms.delete || u.id === me.id, onClick: () => setToDelete(u) },
-                          ]}
-                        />
-                      </div>
-                    </td>
+                  <tr key={u.id}>
+                    <td className="col-menu">{rowMenu(u)}</td>
+                    {cols.columns.map((c) => c.td(u))}
                   </tr>
                 ))}
               </tbody>

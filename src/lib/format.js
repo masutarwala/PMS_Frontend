@@ -1,18 +1,29 @@
-const dateFmt = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-const dateTimeFmt = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+import { zonedFormat } from './timezone';
+
+// Timestamps are shown in the signed-in user's time zone (lib/timezone). A calendar date
+// ('YYYY-MM-DD') has no zone and is shown as it is.
+const DATE = { day: '2-digit', month: 'short', year: 'numeric' };
+const isDateOnly = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const calendarFmt = (opts) => new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', ...opts });
+
+function show(value, opts) {
+  if (!value) return '—';
+  if (isDateOnly(value)) return calendarFmt(opts).format(new Date(`${value}T00:00:00Z`));
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '—' : zonedFormat(opts).format(d);
+}
 
 /** 'YYYY-MM-DD' or ISO → '30 Nov 2026' */
-export function formatDate(value) {
-  if (!value) return '—';
-  const d = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value);
-  return Number.isNaN(d.getTime()) ? '—' : dateFmt.format(d);
-}
+export const formatDate = (value) => show(value, DATE);
 
-export function formatDateTime(value) {
-  if (!value) return '—';
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? '—' : dateTimeFmt.format(d);
-}
+/** ISO → '30 Nov 2026, 14:05' (user's time zone) */
+export const formatDateTime = (value) => (isDateOnly(value) ? formatDate(value) : show(value, { ...DATE, hour: '2-digit', minute: '2-digit' }));
+
+/** → '30 Nov' */
+export const formatDayMonth = (value) => show(value, { day: 'numeric', month: 'short' });
+
+/** ISO → '30 Nov, 14:05' (user's time zone) */
+export const formatDayMonthTime = (value) => show(value, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 export function formatMoney(amount, currency = 'INR') {
   if (amount === null || amount === undefined) return '—';

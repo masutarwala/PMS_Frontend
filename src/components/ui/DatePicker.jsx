@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { Calendar, ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useDismiss, usePlacement } from './popover';
+import { todayIso } from '@/lib/timezone';
 
 /*
  * Date picker used for every date field in the app (instead of the browser's own picker,
@@ -16,10 +17,6 @@ const toIso = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
 const parse = (v) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v ?? '');
   return m ? { y: Number(m[1]), m: Number(m[2]) - 1, d: Number(m[3]) } : null;
-};
-const todayIso = () => {
-  const t = new Date();
-  return toIso(t.getFullYear(), t.getMonth(), t.getDate());
 };
 export const formatPickerDate = (v) => {
   const p = parse(v);
@@ -51,7 +48,7 @@ export function DatePicker({ value, onChange, onBlur, placeholder = 'Select date
     setView('days');
     onBlur?.();
   }, [onBlur]);
-  usePlacement(open, toggleRef, menuRef, false, 300);
+  usePlacement(open, toggleRef, menuRef, false, 300, true); // the same 300px calendar on every field
   useDismiss(open, rootRef, menuRef, close);
 
   // open on the selected month (or this month)

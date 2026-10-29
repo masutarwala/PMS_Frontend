@@ -3,9 +3,10 @@ import { useEffect, useLayoutEffect } from 'react';
 /**
  * Positions an open menu with `position: fixed` against the viewport (same as the
  * mock-ups' app.js) so tables and cards with overflow never clip it; opens upwards
- * when there is no room below.
+ * when there is no room below. With `exact`, the menu is exactly minWidth wide (e.g. the calendar),
+ * otherwise at least as wide as its field.
  */
-export function usePlacement(open, toggleRef, menuRef, alignRight, minWidth = 0) {
+export function usePlacement(open, toggleRef, menuRef, alignRight, minWidth = 0, exact = false) {
   useLayoutEffect(() => {
     if (!open || !toggleRef.current || !menuRef.current) return;
     const menu = menuRef.current;
@@ -14,8 +15,8 @@ export function usePlacement(open, toggleRef, menuRef, alignRight, minWidth = 0)
     const vh = window.innerHeight;
     Object.assign(menu.style, {
       position: 'fixed',
-      minWidth: `${Math.max(r.width, minWidth)}px`,
-      maxWidth: `${Math.max(r.width, minWidth, 340)}px`,
+      minWidth: `${exact ? minWidth : Math.max(r.width, minWidth)}px`,
+      maxWidth: `${exact ? minWidth : Math.max(r.width, minWidth, 340)}px`,
       top: '0px',
       left: '0px',
       right: 'auto',
@@ -29,7 +30,7 @@ export function usePlacement(open, toggleRef, menuRef, alignRight, minWidth = 0)
     left = Math.min(Math.max(8, left), vw - mw - 8);
     menu.style.top = `${top}px`;
     menu.style.left = `${left}px`;
-  }, [open, toggleRef, menuRef, alignRight, minWidth]);
+  }, [open, toggleRef, menuRef, alignRight, minWidth, exact]);
 }
 
 /** Closes on outside click, Escape, scroll outside the menu and resize. */

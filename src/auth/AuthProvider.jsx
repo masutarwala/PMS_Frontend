@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { refreshSession, setAccessToken, setSessionExpiredHandler } from '@/api/client';
 import { authApi } from '@/api/endpoints';
+import { clearSessionStates } from '@/hooks/useSessionState';
+import { setUserTimeZone } from '@/lib/timezone';
 import { AuthContext } from './auth-context';
 
 /**
@@ -15,7 +17,8 @@ export function AuthProvider({ children }) {
 
   const apply = useCallback((data) => {
     setAccessToken(data.accessToken ?? null);
-    setSession({ user: data.user, permissions: data.permissions, menus: data.menus });
+    setUserTimeZone(data.user?.timeZone); // all dates / times follow the user's zone
+    setSession({ user: data.user, permissions: data.permissions, projectAccess: data.projectAccess, menus: data.menus });
     setStatus('authenticated');
   }, []);
 
@@ -53,6 +56,7 @@ export function AuthProvider({ children }) {
     try {
       await authApi.logout();
     } finally {
+      clearSessionStates();
       clear();
     }
   }, [clear]);
@@ -60,7 +64,8 @@ export function AuthProvider({ children }) {
   // Re-reads permissions and menus (e.g. after editing the current user's role).
   const reloadSession = useCallback(async () => {
     const data = await authApi.me();
-    setSession({ user: data.user, permissions: data.permissions, menus: data.menus });
+    setUserTimeZone(data.user?.timeZone);
+    setSession({ user: data.user, permissions: data.permissions, projectAccess: data.projectAccess, menus: data.menus });
   }, []);
 
   const can = useCallback(

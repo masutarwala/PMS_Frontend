@@ -1,19 +1,21 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowUpRight, ChevronRight, Download, EllipsisVertical, Eye, Pencil, Plus, Search, Shield, Tag, Trash2, Users } from 'lucide-react';
+import { ArrowUpRight, ChevronRight, Download, Eye, Pencil, Plus, Search, Shield, Tag, Trash2, Users } from 'lucide-react';
 import { rolesApi } from '@/api/endpoints';
 import { errorMessage } from '@/api/client';
 import { usePermissions } from '@/auth/auth-context';
 import { Topbar } from '@/components/layout/Topbar';
-import { ActionMenu, Dropdown } from '@/components/ui/Dropdown';
+import { Dropdown } from '@/components/ui/Dropdown';
 import { ActiveBadge, Badge, EmptyState, ErrorAlert } from '@/components/ui/Display';
-import { ActiveFilters, BulkBar, CARD_TONES, SelectAllCell, SelectRowCell, ViewSwitch, useSelection, useViewMode } from '@/components/ui/ListKit';
+import { ActiveFilters, CARD_TONES, ViewSwitch, useSelection, useViewMode, SingleFilter } from '@/components/ui/ListKit';
 import { ConfirmDeleteModal } from '@/components/ui/Modal';
 import { TableFoot } from '@/components/ui/Pager';
+import { ColumnPicker, RowMenu, useColumns } from '@/components/ui/ColumnPicker';
 import { TableLoading } from '@/components/ui/Loader';
 import { useToast } from '@/components/ui/toast-context';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useSessionState } from '@/hooks/useSessionState';
 import { DATA_SCOPES, SCREENS } from '@/lib/constants';
 import { downloadCsv } from '@/lib/csv';
 
@@ -24,15 +26,16 @@ const ACTIVE_OPTIONS = [{ value: 'active', label: 'Active' }, { value: 'inactive
 
 export default function RoleListPage() {
   const perms = usePermissions(SCREENS.ROLES);
+  const navigate = useNavigate();
   const toast = useToast();
   const queryClient = useQueryClient();
   const [view, setView] = useViewMode('roles');
-  const [search, setSearch] = useState('');
-  const [roleType, setRoleType] = useState([]);
-  const [dataScope, setDataScope] = useState([]);
-  const [active, setActive] = useState(null);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [search, setSearch] = useSessionState('roles.search', '');
+  const [roleType, setRoleType] = useSessionState('roles.roleType', []);
+  const [dataScope, setDataScope] = useSessionState('roles.dataScope', []);
+  const [active, setActive] = useSessionState('roles.active', null);
+  const [page, setPage] = useSessionState('roles.page', 1);
+  const [pageSize, setPageSize] = useSessionState('roles.pageSize', 10);
   const [toDelete, setToDelete] = useState(null); // role or 'bulk'
   const debouncedSearch = useDebounce(search);
 
@@ -86,6 +89,63 @@ export default function RoleListPage() {
   const skipped = toDelete === 'bulk' ? selection.count - deleteIds.length : 0;
   const editUrl = (r) => `/administration/roles/${r.id}/edit`;
 
+  const rowMenu = (r) => (
+    <RowMenu
+      items={[
+        { label: 'Edit', icon: Pencil, hidden: !perms.edit, onClick: () => navigate(editUrl(r)) },
+        { divider: true, hidden: !perms.delete || r.isSystem },
+        { label: 'Delete', icon: Trash2, danger: true, hidden: !perms.delete || r.isSystem, onClick: () => setToDelete(r) },
+      ]}
+    />
+  );
+
+  // table columns – shown / hidden and ordered by the user (Columns button)
+  const cols = useColumns('roles', [
+    {
+      key: 'name',
+      label: 'Role',
+      locked: true,
+      td: (r) => (
+        <td key="name">
+          <Link className="cell-title" to={editUrl(r)} style={{ color: 'var(--ink)' }}>
+            {r.name}
+          </Link>
+          <div className="cell-sub">{r.code}</div>
+        </td>
+      ),
+    },
+    { key: 'code', label: 'Code', td: (r) => <td key="code" className="nowrap">{r.code}</td> },
+    { key: 'level', label: 'Level', className: 'right', td: (r) => <td key="level" className="num right">{r.level}</td> },
+    {
+      key: 'roleType',
+      label: 'Role type',
+      td: (r) => (
+        <td key="roleType">
+          <Badge tone={r.roleType === 'internal' ? 'success' : 'info'}>{typeLabel(r.roleType)}</Badge>
+        </td>
+      ),
+    },
+    {
+      key: 'dataScope',
+      label: 'Data scope',
+      td: (r) => (
+        <td key="dataScope">
+          <Badge tone={r.dataScope === 'all' ? 'success' : undefined}>{scopeLabel(r.dataScope)}</Badge>
+        </td>
+      ),
+    },
+    { key: 'users', label: 'Users', className: 'right', td: (r) => <td key="users" className="num right">{r.userCount}</td> },
+    {
+      key: 'active',
+      label: 'Active',
+      td: (r) => (
+        <td key="active">
+          <ActiveBadge active={r.isActive} />
+        </td>
+      ),
+    },
+  ]);
+
   return (
     <>
       <Topbar
@@ -114,10 +174,11 @@ export default function RoleListPage() {
             <Search />
             <input className="input" placeholder="Search roles & permissions…" value={search} onChange={(e) => resetPage(setSearch)(e.target.value)} />
           </div>
-          <Dropdown pill multi placeholder="Role type" options={TYPE_OPTIONS} value={roleType} onChange={resetPage(setRoleType)} />
-          <Dropdown pill multi placeholder="Data scope" options={DATA_SCOPES} value={dataScope} onChange={resetPage(setDataScope)} />
+          <SingleFilter placeholder="Role type" options={TYPE_OPTIONS} value={roleType} onChange={resetPage(setRoleType)} />
+          <SingleFilter placeholder="Data scope" options={DATA_SCOPES} value={dataScope} onChange={resetPage(setDataScope)} />
           <Dropdown pill clearable placeholder="Active" options={ACTIVE_OPTIONS} value={active} onChange={resetPage(setActive)} />
           <span className="spacer" />
+          {view === 'table' && <ColumnPicker cols={cols} />}
           <ViewSwitch value={view} onChange={setView} />
         </div>
 
@@ -132,19 +193,6 @@ export default function RoleListPage() {
           }}
         />
 
-        <BulkBar count={selection.count}>
-          {perms.export && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportRows(items.filter((r) => selection.isSelected(r.id)))}>
-              Export selected
-            </button>
-          )}
-          {perms.delete && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setToDelete('bulk')}>
-              <Trash2 />
-              Delete
-            </button>
-          )}
-        </BulkBar>
 
         {list.isError && (
           <div style={{ padding: '12px 20px 0' }}>
@@ -157,57 +205,20 @@ export default function RoleListPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <SelectAllCell selection={selection} />
-                  <th>Role</th>
-                  <th>Code</th>
-                  <th className="right">Level</th>
-                  <th>Role type</th>
-                  <th>Data scope</th>
-                  <th className="right">Users</th>
-                  <th>Active</th>
-                  <th className="col-actions" />
+                  <th className="col-menu" />
+                  {cols.columns.map((c) => (
+                    <th key={c.key} className={c.className}>
+                      {c.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {list.isLoading && <TableLoading colSpan={9} />}
+                {list.isLoading && <TableLoading colSpan={cols.columns.length + 1} />}
                 {items.map((r) => (
-                  <tr key={r.id} className={selection.isSelected(r.id) ? 'is-selected' : ''}>
-                    <SelectRowCell selection={selection} id={r.id} />
-                    <td>
-                      <Link className="cell-title" to={editUrl(r)} style={{ color: 'var(--ink)' }}>
-                        {r.name}
-                      </Link>
-                      <div className="cell-sub">{r.code}</div>
-                    </td>
-                    <td className="nowrap">{r.code}</td>
-                    <td className="num right">{r.level}</td>
-                    <td>
-                      <Badge tone={r.roleType === 'internal' ? 'success' : 'info'}>{typeLabel(r.roleType)}</Badge>
-                    </td>
-                    <td>
-                      <Badge tone={r.dataScope === 'all' ? 'success' : undefined}>{scopeLabel(r.dataScope)}</Badge>
-                    </td>
-                    <td className="num right">{r.userCount}</td>
-                    <td>
-                      <ActiveBadge active={r.isActive} />
-                    </td>
-                    <td className="col-actions">
-                      <div className="row-actions">
-                        {perms.edit && (
-                          <Link className="btn btn-ghost btn-icon" to={editUrl(r)} title="Edit">
-                            <Pencil />
-                          </Link>
-                        )}
-                        <ActionMenu
-                          trigger={({ toggle, title }) => (
-                            <button type="button" className="dropdown-toggle btn btn-ghost btn-icon" style={{ width: 32, height: 32, border: 0, padding: 0, justifyContent: 'center' }} title={title} onClick={toggle}>
-                              <EllipsisVertical />
-                            </button>
-                          )}
-                          items={[{ label: 'Delete', icon: Trash2, danger: true, hidden: !perms.delete || r.isSystem, onClick: () => setToDelete(r) }]}
-                        />
-                      </div>
-                    </td>
+                  <tr key={r.id}>
+                    <td className="col-menu">{rowMenu(r)}</td>
+                    {cols.columns.map((c) => c.td(r))}
                   </tr>
                 ))}
               </tbody>

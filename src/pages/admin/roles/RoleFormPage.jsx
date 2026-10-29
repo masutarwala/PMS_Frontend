@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Cloud } from 'lucide-react';
+import { Check, Cloud, Copy } from 'lucide-react';
 import { rolesApi } from '@/api/endpoints';
 import { errorMessage } from '@/api/client';
 import { useAuth } from '@/auth/auth-context';
@@ -13,10 +13,12 @@ import { Dropdown } from '@/components/ui/Dropdown';
 import { Checkbox, ChoiceGroup, Field, Switch } from '@/components/ui/Field';
 import { ErrorAlert } from '@/components/ui/Display';
 import { FullPageLoader, Spinner } from '@/components/ui/Loader';
+import { useConfirm } from '@/components/ui/confirm-context';
 import { useToast } from '@/components/ui/toast-context';
 import { useApiFormError } from '@/hooks/useApiForm';
 import { DATA_SCOPES, PERMISSION_ACTIONS } from '@/lib/constants';
 import NotFoundPage from '@/pages/errors/NotFoundPage';
+import { ACCESS_LEVELS, PROJECT_FIELDS, PROJECT_TABS } from '@/lib/projectAccess';
 
 const schema = z.object({
   name: z.string().trim().min(1, 'Enter the role name').max(100),
@@ -112,6 +114,58 @@ function PermissionMatrix({ menus, value, onChange, can, readOnly }) {
   );
 }
 
+/** Rows (tabs or fields) with a Hidden / View / Edit choice each; missing = Edit. */
+function AccessTable({ title, rows, value, onChange, readOnly }) {
+  const levelOf = (r) => value[r.key] ?? (r.editable === false ? 'view' : 'edit');
+  const allowed = (r, level) => !(level === 'edit' && r.editable === false) && !(level === 'hidden' && r.required);
+  return (
+    <div className="editor perm-matrix">
+      <table className="data-table is-compact">
+        <thead>
+          <tr>
+            <th>{title}</th>
+            {ACCESS_LEVELS.map((l) => (
+              <th key={l.value} className="center" style={{ width: 90 }}>
+                {l.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.key}>
+              <td>
+                {r.label}
+                {r.required && <span className="muted small"> · required</span>}
+                {r.note && <div className="muted small">{r.note}</div>}
+              </td>
+              {ACCESS_LEVELS.map((l) => (
+                <td key={l.value} className="center">
+                  {allowed(r, l.value) ? (
+                    <input
+                      type="radio"
+                      className="access-radio"
+                      name={`${title}-${r.key}`}
+                      checked={levelOf(r) === l.value}
+                      disabled={readOnly}
+                      onChange={() => onChange({ ...value, [r.key]: l.value })}
+                      aria-label={`${r.label}: ${l.label}`}
+                    />
+                  ) : (
+                    <span className="muted" title={r.required ? 'Every project needs this field' : 'This tab has nothing to edit'}>
+                      –
+                    </span>
+                  )}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function FragmentRows({ module, colSpan, children }) {
   return (
     <>
@@ -131,10 +185,19 @@ export default function RoleFormPage() {
   const queryClient = useQueryClient();
   const { user: me, can, reloadSession } = useAuth();
   const [matrix, setMatrix] = useState({});
+  const [access, setAccess] = useState({ tabs: {}, fields: {} }); // project tabs / fields: hidden · view · edit
 
   const menus = useQuery({ queryKey: ['menus'], queryFn: rolesApi.menus, staleTime: 5 * 60 * 1000 });
   const roleQ = useQuery({ queryKey: ['roles', id], queryFn: () => rolesApi.get(id), enabled: isEdit, retry: false });
   const role = roleQ.data;
+  // "Clone from": every other role that has permissions (Super Admin needs none)
+  const allRoles = useQuery({ queryKey: ['roles', 'clone-list'], queryFn: () => rolesApi.list({ pageSize: 100, sortBy: 'level' }), staleTime: 60 * 1000 });
+  const cloneOptions = (allRoles.data?.items ?? [])
+    .filter((r) => r.level > 0 && String(r.id) !== String(id))
+    .map((r) => ({ value: r.id, label: `${r.name} (level ${r.level})` }));
+  const [cloneFrom, setCloneFrom] = useState(null);
+  const [cloning, setCloning] = useState(false);
+  const confirm = useConfirm();
 
   const {
     control,
@@ -149,8 +212,16 @@ export default function RoleFormPage() {
 
   useEffect(() => {
     if (!role) return;
-    reset({ name: role.name, code: role.code, level: role.level, roleType: role.roleType, dataScope: role.dataScope, isActive: role.isActive });
+    reset({
+      name: role.name,
+      code: role.code,
+      level: role.level,
+      roleType: role.roleType,
+      dataScope: role.dataScope,
+      isActive: role.isActive,
+    });
     setMatrix(Object.fromEntries(role.permissions.map(({ menuId, ...flags }) => [menuId, flags])));
+    setAccess({ tabs: role.accessRules?.tabs ?? {}, fields: role.accessRules?.fields ?? {} });
   }, [role, reset]);
 
   const isSuperAdminRole = role?.level === 0;
@@ -183,9 +254,47 @@ export default function RoleFormPage() {
     const permissions = Object.entries(matrix)
       .map(([menuId, flags]) => ({ menuId: Number(menuId), ...NO_FLAGS, ...flags }))
       .filter((p) => PERMISSION_ACTIONS.some((a) => p[a.key]));
-    return save.mutateAsync({ ...v, code: v.code || undefined, permissions }).catch(() => {});
+    return save.mutateAsync({ ...v, code: v.code || undefined, permissions, accessRules: access }).catch(() => {});
   };
   const err = (n) => errors[n]?.message;
+
+  /** Copies another role's permissions and project access into this form (name, level, scope stay). */
+  const cloneRole = async (sourceId) => {
+    if (!sourceId) return;
+    const source = cloneOptions.find((o) => o.value === sourceId)?.label ?? 'the role';
+    const hasTicks = Object.values(matrix).some((flags) => PERMISSION_ACTIONS.some((a) => flags?.[a.key]));
+    if (
+      hasTicks &&
+      !(await confirm({
+        title: 'Replace permissions?',
+        message: `The permissions ticked here are replaced with the ones of ${source}.`,
+        confirmLabel: 'Replace',
+        tone: 'primary',
+      }))
+    ) {
+      return;
+    }
+    setCloning(true);
+    try {
+      const src = await queryClient.fetchQuery({ queryKey: ['roles', String(sourceId)], queryFn: () => rolesApi.get(sourceId) });
+      // only what each screen supports and what the signed-in user may grant
+      const screens = (menus.data ?? []).flatMap((m) => m.children);
+      const next = {};
+      for (const { menuId, ...flags } of src.permissions) {
+        const screen = screens.find((sc) => sc.id === menuId);
+        if (!screen) continue;
+        next[menuId] = Object.fromEntries(PERMISSION_ACTIONS.map((a) => [a.key, !!flags[a.key] && (screen.actions ?? []).includes(a.key) && can(screen.url, a.key)]));
+      }
+      setMatrix(next);
+      setAccess({ tabs: src.accessRules?.tabs ?? {}, fields: src.accessRules?.fields ?? {} });
+      setCloneFrom(sourceId);
+      toast.success(`Permissions copied from ${src.name} – change any of them before saving`);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setCloning(false);
+    }
+  };
 
   return (
     <>
@@ -249,14 +358,31 @@ export default function RoleFormPage() {
           <section className="card card-lg form-card">
             <div className="fc-head">
               <span className="fc-num">2</span>
-              <div>
+              <div style={{ flex: 1 }}>
                 <div className="form-section-title">Permissions</div>
                 <div className="form-section-sub">
                   {isSuperAdminRole || levelIsZero
                     ? 'Level 0 (Super Admin) can do everything – no permissions to set.'
-                    : 'Tick the actions this role can perform on each screen.'}
+                    : 'Tick the actions this role can perform on each screen, or clone them from another role.'}
                 </div>
               </div>
+              {!(isSuperAdminRole || levelIsZero) && (
+                <div className="role-clone">
+                  <span className="role-clone-label">
+                    <Copy />
+                    Clone from
+                  </span>
+                  <Dropdown
+                    search
+                    clearable
+                    placeholder={allRoles.isLoading ? 'Loading roles…' : 'Select a role'}
+                    disabled={cloning || !cloneOptions.length}
+                    options={cloneOptions}
+                    value={cloneFrom}
+                    onChange={(v) => (v ? cloneRole(v) : setCloneFrom(null))}
+                  />
+                </div>
+              )}
             </div>
             {menus.isError ? (
               <ErrorAlert>{errorMessage(menus.error)}</ErrorAlert>
@@ -272,6 +398,25 @@ export default function RoleFormPage() {
               />
             )}
           </section>
+
+          {!(isSuperAdminRole || levelIsZero) && (
+            <section className="card card-lg form-card">
+              <div className="fc-head">
+                <span className="fc-num">3</span>
+                <div>
+                  <div className="form-section-title">Project access</div>
+                  <div className="form-section-sub">
+                    Which project tabs and Project-tab fields this role sees (View) or changes (Edit). Edit still needs Edit on Project List above. Hidden fields are also blank in the
+                    project list.
+                  </div>
+                </div>
+              </div>
+              <div className="access-grid">
+                <AccessTable title="Project tab" rows={PROJECT_TABS} value={access.tabs} onChange={(tabs) => setAccess((a) => ({ ...a, tabs }))} />
+                <AccessTable title="Project tab field" rows={PROJECT_FIELDS} value={access.fields} onChange={(fields) => setAccess((a) => ({ ...a, fields }))} />
+              </div>
+            </section>
+          )}
 
           <div className="form-bar">
             <span className="note">
